@@ -1,0 +1,213 @@
+/* Plan 2.4 — Release 2.4.1: the payment worklist, truncation honesty, and a11y helpers. */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Plan 2.4 §5.2 — a capped list must announce itself, not imply completeness. */
+.record-truncation-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin: 0;
+  padding: var(--s-3);
+  border: 1px solid var(--soon-line);
+  border-radius: var(--r-md);
+  background: var(--soon-soft);
+  color: var(--text);
+  font-size: var(--t-sm);
+  line-height: var(--lh-body);
+}
+.record-truncation-notice svg { flex: none; margin-top: 3px; color: var(--soon); }
+
+/* Plan 2.4 §5.3 — the payment worklist. */
+.payment-worklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  /* Same reason as the wrap below: this is a column flex container, and a flex
+     item's min-width defaults to auto, so the widest row would otherwise set
+     the page width and push the filter and export controls off a 390px screen. */
+  min-width: 0;
+  max-width: 100%;
+}
+
+.worklist-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  align-items: center;
+  justify-content: space-between;
+}
+.worklist-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-sm);
+  color: var(--text-2);
+  font-weight: 600;
+}
+.worklist-count svg { color: var(--text-3); }
+.worklist-filters { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.worklist-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.worklist-filter:hover { border-color: var(--border-strong); color: var(--text); }
+.worklist-filter.is-active { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+.worklist-filter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.worklist-filter-count {
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--surface-inset);
+  color: var(--text-3);
+  font-size: var(--t-2xs);
+  text-align: center;
+}
+.worklist-filter.is-active .worklist-filter-count { color: var(--accent); }
+
+.worklist-empty { margin: 0; color: var(--text-3); font-size: var(--t-sm); }
+
+.worklist-table-wrap {
+  /* min-width:0 is load-bearing: a column flex item defaults to min-width:auto,
+     so the table's min-content width would otherwise stretch the whole page and
+     push every sibling off a 390px screen. The wrap scrolls instead. */
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.worklist-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+.worklist-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--s-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--t-2xs);
+  font-weight: 700;
+  text-align: start;
+  white-space: nowrap;
+}
+.worklist-row th, .worklist-row td {
+  padding: var(--s-3);
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+  text-align: start;
+}
+.worklist-row:hover { background: var(--surface-2); }
+.worklist-row.is-conflict { background: var(--overdue-soft); }
+.worklist-row.is-conflict:hover { background: var(--overdue-soft); }
+
+.worklist-company { font-weight: 600; min-width: 180px; }
+.worklist-company-name { display: block; color: var(--text); overflow-wrap: anywhere; }
+.worklist-company-english { display: block; color: var(--text-3); font-size: var(--t-2xs); overflow-wrap: anywhere; }
+.worklist-claim { display: block; color: var(--text-4); font-size: var(--t-2xs); font-family: var(--font-mono); }
+.worklist-amount { white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 600; }
+.worklist-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.worklist-unknown { color: var(--text-4); font-style: italic; }
+
+.worklist-lane {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px var(--s-2);
+  border: 1px solid var(--neutral-line);
+  border-radius: var(--r-full);
+  background: var(--neutral-soft);
+  color: var(--neutral);
+  font-size: var(--t-2xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.worklist-lane.calm { border-color: var(--done-line); background: var(--done-soft); color: var(--done); }
+.worklist-lane.attention { border-color: var(--soon-line); background: var(--soon-soft); color: var(--soon); }
+.worklist-lane.urgent { border-color: var(--overdue-line); background: var(--overdue-soft); color: var(--overdue); }
+.worklist-lane.muted { border-color: var(--neutral-line); background: var(--neutral-soft); color: var(--neutral); }
+.worklist-lane-raw {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: var(--t-2xs);
+  overflow-wrap: anywhere;
+}
+
+.worklist-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.worklist-expand:hover { color: var(--text); border-color: var(--border-strong); }
+.worklist-expand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.worklist-detail-row td { background: var(--surface-inset); border-bottom: 1px solid var(--border); }
+.worklist-detail { display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-1) 0; }
+.worklist-flags { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.worklist-flag {
+  padding: 2px var(--s-2);
+  border: 1px solid var(--neutral-line);
+  border-radius: var(--r-full);
+  background: var(--neutral-soft);
+  color: var(--neutral);
+  font-size: var(--t-2xs);
+  font-weight: 700;
+}
+.worklist-flag.attention { border-color: var(--soon-line); background: var(--soon-soft); color: var(--soon); }
+.worklist-flag.urgent { border-color: var(--overdue-line); background: var(--overdue-soft); color: var(--overdue); }
+.worklist-detail-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--s-3);
+  margin: 0;
+}
+.worklist-detail-list div { display: flex; flex-direction: column; gap: 2px; }
+.worklist-detail-list dt { color: var(--text-4); font-size: var(--t-2xs); font-weight: 600; }
+.worklist-detail-list dd { margin: 0; color: var(--text); font-size: var(--t-xs); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.worklist-readonly-note { margin: 0; color: var(--text-3); font-size: var(--t-xs); line-height: var(--lh-body); }
+
+@media (max-width: 720px) {
+  .worklist-table thead { display: none; }
+  /* design-system.css sets `table { min-width: 680px }` so wide desktop tables
+     stay readable. Stacked on mobile, that floor would defeat the layout. */
+  .worklist-table, .worklist-table tbody, .worklist-table tr, .worklist-table th, .worklist-table td { display: block; width: 100%; }
+  .worklist-table { width: auto; min-width: 0; }
+  .worklist-row th, .worklist-row td { border-bottom: none; }
+  .worklist-row td { padding-top: 0; padding-bottom: var(--s-2); }
+  .worklist-row { padding-bottom: var(--s-3); border-bottom: 1px solid var(--border-soft); }
+  .worklist-detail-row td { display: block; }
+}

@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
+data/*.db
+data/*.db-*
+data/pdfs/*
+data/backups/*
+channels/.wwebjs_auth/
+channels/.wwebjs_cache/

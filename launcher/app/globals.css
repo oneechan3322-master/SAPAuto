@@ -1,0 +1,13 @@
+@import "tailwindcss";
+@import "./design-system.css";
+@import "./components.css";
+@import "./plan24.css";
+
+.auth-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.auth-card { display: grid; gap: 18px; width: min(480px, 100%); padding: clamp(24px, 5vw, 40px); border: 1px solid var(--line); border-radius: 20px; background: var(--panel); box-shadow: 0 22px 80px rgb(0 0 0 / 24%); }
+.auth-card h1 { margin: 0; font-size: clamp(26px, 5vw, 34px); }
+.auth-card > p { margin: -8px 0 4px; color: var(--muted); line-height: 1.7; }
+.auth-eyebrow { color: var(--teal); font-size: 12px; font-weight: 700; }
+.auth-error { margin: 0; color: var(--red); font-size: 13px; }
+.logout-button { width: 100%; text-align: start; }
+.logout-error { margin: 6px 10px; color: var(--red); font-size: 11px; }
