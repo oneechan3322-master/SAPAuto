@@ -79,4 +79,36 @@ test('first-run setup creates the sole owner and establishes a session', async (
   }))
   assert.equal(secondOwner.status, 409)
   assert.equal(getDatabase().prepare('SELECT COUNT(*) AS count FROM users').get().count, 1)
+
+  const anonymousAfterOwner = await requireRole(new Request('http://localhost:3000/api/status', {
+    headers: { host: 'localhost:3000' }
+  }), 'Viewer')
+  assert.equal(anonymousAfterOwner.response.status, 401)
+
+  const viewer = await POST(new Request('http://localhost:3000/api/setup', {
+    method: 'POST',
+    headers: {
+      host: 'localhost:3000',
+      origin: 'http://localhost:3000',
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: 'Renewed Owner',
+      email: 'renewed@example.test',
+      password: 'Renewed-Password-123!'
+    })
+  }))
+  assert.equal(viewer.status, 409)
+
+  const previousOpenAccess = process.env.V8_OPEN_ACCESS
+  process.env.V8_OPEN_ACCESS = '1'
+  try {
+    const opened = await requireRole(new Request('http://localhost:3000/api/status', {
+      headers: { host: 'localhost:3000' }
+    }), 'Viewer')
+    assert.equal(opened.session.user.role, 'Owner')
+  } finally {
+    if (previousOpenAccess === undefined) delete process.env.V8_OPEN_ACCESS
+    else process.env.V8_OPEN_ACCESS = previousOpenAccess
+  }
 })

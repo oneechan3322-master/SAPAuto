@@ -26,12 +26,4 @@ function linkedUser(channel, externalId, db = getDatabase()) {
     JOIN users u ON u.id=c.user_id WHERE c.channel=? AND c.external_id=?`).get(channel, externalId) || null
 }
 
-function allowUnlinkedReply(channel, externalId, db = getDatabase()) {
-  const key = `unlinked_reply:${channel}:${externalId}`
-  const timestamp = now()
-  const insert = db.prepare(`INSERT INTO settings(key,value,updated_at) VALUES(?,'sent',?)
-    ON CONFLICT(key) DO NOTHING`).run(key, timestamp)
-  return insert.changes === 1
-}
-
-module.exports = { consumeLinkCode, linkedUser, allowUnlinkedReply }
+module.exports = { consumeLinkCode, linkedUser }

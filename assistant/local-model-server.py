@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,60 +18,119 @@ MODEL_PATH = Path(os.environ["V8_LOCAL_MODEL_FILE"]).resolve()
 API_TOKEN = os.environ.get("V8_LOCAL_AI_TOKEN", "")
 PORT = int(os.environ.get("V8_LOCAL_AI_PORT", "7799"))
 TOOLS_PATTERN = re.compile(r"<\|tool_call>call:([A-Za-z_][A-Za-z0-9_]*)")
+LEGACY_CALL_PATTERN = re.compile(
+    r"\{\s*\"tool_name\"\s*:\s*\"([A-Za-z_][A-Za-z0-9_]*)\"\s*,\s*\"parameters\"\s*:\s*",
+    re.S,
+)
+CLOSING_MARKER = "<tool_call|>"
+# llama.cpp is not safe to drive concurrently through one Llama instance. A
+# threaded HTTP server is useful for health checks, but inference itself must
+# be single-filed or native crashes can take the entire local assistant down.
+INFERENCE_LOCK = threading.Lock()
+
+
+def scan_object_end(text: str, start: int) -> int:
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return -1
+
+
+def load_arguments(raw: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        repaired = re.sub(r",\s*([}\]])", r"\1", raw)
+        if '"' not in repaired:
+            repaired = repaired.replace("'", '"')
+        repaired = re.sub(r"([{,])\s*([A-Za-z_][A-Za-z0-9_]*)\s*:", r'\1"\2":', repaired)
+        try:
+            value = json.loads(repaired)
+        except json.JSONDecodeError:
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def build_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"call_{uuid.uuid4().hex}",
+        "type": "function",
+        "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
+    }
 
 
 def parse_tool_calls(content: str, allowed_names: set[str]) -> tuple[str, list[dict[str, Any]]]:
     calls = []
     output = content
-    offset = 0
     while True:
-        match = TOOLS_PATTERN.search(output, offset)
+        match = TOOLS_PATTERN.search(output)
         if not match:
             break
         name = match.group(1)
         if name not in allowed_names:
             raise ValueError("Model requested a tool outside the supplied registry")
         start = match.end()
-        if start >= len(output) or output[start] != "{":
-            raise ValueError("Model returned malformed Gemma tool arguments")
-        depth = 0
-        in_string = False
-        escaped = False
-        end = -1
-        for index in range(start, len(output)):
-            char = output[index]
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_string = False
-            elif char == '"':
-                in_string = True
-            elif char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    end = index + 1
-                    break
-        closing = "<tool_call|>"
-        if end < 0 or not output.startswith(closing, end):
-            raise ValueError("Model returned an incomplete Gemma tool call")
-        try:
-            arguments = json.loads(output[start:end])
-        except json.JSONDecodeError as exc:
-            raise ValueError("Model returned invalid Gemma tool arguments") from exc
-        if not isinstance(arguments, dict):
-            raise ValueError("Gemma tool arguments must be a JSON object")
-        calls.append({
-            "id": f"call_{uuid.uuid4().hex}",
-            "type": "function",
-            "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
-        })
-        output = output[:match.start()] + output[end + len(closing):]
-        offset = match.start()
+        arguments: dict[str, Any] = {}
+        consumed = start
+        if start < len(output) and output[start] == "{":
+            end = scan_object_end(output, start)
+            if end > 0:
+                arguments = load_arguments(output[start:end])
+                consumed = end
+                closing = re.match(r"\s*" + re.escape(CLOSING_MARKER), output[end:])
+                if closing:
+                    consumed += closing.end()
+        calls.append(build_call(name, arguments))
+        output = output[:match.start()] + output[consumed:]
+    if not calls:
+        # Gemma sometimes wraps a legacy call in a Markdown `json` fence. The
+        # old pattern consumed only the parameters object and left the outer
+        # closing brace in the visible answer. Parse the complete JSON object
+        # instead, so a tool request cannot be shown to the user as prose.
+        for start, char in enumerate(output):
+            if char != "{":
+                continue
+            end = scan_object_end(output, start)
+            if end <= 0:
+                continue
+            candidate = load_arguments(output[start:end])
+            name = candidate.get("tool_name")
+            arguments = candidate.get("parameters")
+            if name in allowed_names and isinstance(arguments, dict):
+                calls.append(build_call(name, arguments))
+                output = output[:start] + output[end:]
+                break
+    if not calls:
+        legacy = LEGACY_CALL_PATTERN.search(output)
+        if legacy and legacy.group(1) in allowed_names:
+            name = legacy.group(1)
+            start = legacy.end()
+            arguments: dict[str, Any] = {}
+            consumed = legacy.start()
+            if start < len(output) and output[start] == "{":
+                end = scan_object_end(output, start)
+                if end > 0:
+                    arguments = load_arguments(output[start:end])
+                    consumed = end
+            calls.append(build_call(name, arguments))
+            output = output[:legacy.start()] + output[consumed:]
     return output.strip(), calls
 
 
@@ -143,21 +203,41 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(item, dict) and isinstance(item.get("function"), dict)
             and isinstance(item["function"].get("name"), str)
         }
+        if tools:
+            catalog = "\n".join(
+                f"- {item['function'].get('name')}: {item['function'].get('description', '')} parameters={json.dumps(item['function'].get('parameters', {}), ensure_ascii=False)}"
+                for item in tools
+                if isinstance(item, dict) and isinstance(item.get("function"), dict)
+                and isinstance(item["function"].get("name"), str)
+            )
+            guidance = (
+                "You can call the tools below. To call one, emit exactly "
+                '<|tool_call>call:NAME{"argument":"value"}<tool_call|> and nothing else for that call. '
+                "Use the real values from the conversation; never invent names outside this list.\n"
+                "Available tools:\n" + catalog
+            )
+            messages = list(messages)
+            if messages and messages[0].get("role") == "system" and isinstance(messages[0].get("content"), str):
+                messages[0] = {**messages[0], "content": f"{messages[0]['content']}\n\n{guidance}"}
+            else:
+                messages = [{"role": "system", "content": guidance}, *messages]
+            request["messages"] = messages
         options: dict[str, Any] = {
             "messages": messages,
             "temperature": 0.1,
-            "max_tokens": 384,
+            "max_tokens": 512,
         }
-        if tools:
-            options["tools"] = tools
-            options["tool_choice"] = "auto"
         try:
-            result = MODEL.create_chat_completion(**options)
+            # Only one inference may use the native model at a time. Without
+            # this lock simultaneous dashboard/WhatsApp requests can crash the
+            # process (Windows exit code 0xC0000005).
+            with INFERENCE_LOCK:
+                result = MODEL.create_chat_completion(**options)
             choice = result["choices"][0]
             message = choice.get("message", {})
             content = message.get("content") or ""
             tool_calls = message.get("tool_calls") or []
-            if not tool_calls and "<|tool_call>call:" in content:
+            if not tool_calls:
                 content, tool_calls = parse_tool_calls(content, allowed_names)
             for call in tool_calls:
                 if call.get("function", {}).get("name") not in allowed_names:
@@ -189,8 +269,13 @@ if MODEL_PATH.open("rb").read(4) != b"GGUF":
 print(f"Loading local model: {MODEL_PATH.name}", flush=True)
 MODEL = Llama(
     model_path=str(MODEL_PATH),
+    # The office host is close to its memory limit. These bounds keep the
+    # local lane alive; requests over the limit are handled by the application
+    # rather than exhausting Windows memory.
     n_ctx=4096,
-    n_threads=max(1, os.cpu_count() or 4),
+    n_batch=128,
+    n_threads=max(1, min(4, os.cpu_count() or 4)),
+    flash_attn=True,
     verbose=False,
 )
 server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)

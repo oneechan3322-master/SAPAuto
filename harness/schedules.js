@@ -3,6 +3,8 @@
 const { getDatabase } = require('../db/connect')
 const { id, now } = require('../db/queries/shared')
 const { createBackup } = require('./backup')
+const { applyObligationDeadlines, createLegalDeadlineReminders } = require('./deadlines')
+const { scanAndIngestAllPdfs } = require('../domain/pdf-scanner.cjs')
 
 function cairoParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -24,10 +26,10 @@ function createDeadlineReminders(db, day) {
   if (!owner) return
   const obligations = db.prepare(`SELECT id,deadline FROM obligations
     WHERE status NOT IN ('done','submitted','resolved') AND deadline <> ''`).all()
-  const current = new Date(`${day}T12:00:00+02:00`)
+  const current = new Date(`${day}T12:00:00Z`)
   for (const obligation of obligations) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(obligation.deadline)) continue
-    const due = new Date(`${obligation.deadline}T12:00:00+02:00`)
+    const due = new Date(`${obligation.deadline}T12:00:00Z`)
     const days = Math.round((due - current) / 86400000)
     if (![0, 1, 3, 7].includes(days)) continue
     const key = `${obligation.id}:${days}`
@@ -56,7 +58,20 @@ async function scheduleTick(db = getDatabase(), backup = createBackup) {
         .run(backupKey, 'done', now())
     }
   }
-  if (p.minute.endsWith('0')) createDeadlineReminders(db, day)
+  if (p.minute.endsWith('0')) {
+    // Plan 4.5: catch-up stamp for studied obligations, then both reminder
+    // clocks — the portal deadline and the law window (respond_by).
+    applyObligationDeadlines(db)
+    createDeadlineReminders(db, day)
+    createLegalDeadlineReminders(db, day)
+  }
+  if (p.minute.endsWith('0') || p.minute.endsWith('5')) {
+    try {
+      await scanAndIngestAllPdfs({ db, importOlderVersions: false })
+    } catch (err) {
+      console.warn(`[PDF Scanner Schedule] ${err.message}`)
+    }
+  }
 }
 
 function startSchedules(db = getDatabase(), intervalMs = 60000) {

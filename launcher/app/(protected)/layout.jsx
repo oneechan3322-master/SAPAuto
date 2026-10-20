@@ -3,9 +3,8 @@ import Navigation from '../../components/navigation.jsx'
 import { pageSession, pageSetupRequired } from '../../lib/guard.js'
 
 export default async function ProtectedLayout({ children }) {
-  if (pageSetupRequired()) redirect('/setup')
   const session = await pageSession()
-  if (!session?.user || session.user.disabled) redirect('/login')
+  if (!session) redirect(pageSetupRequired() ? '/setup' : '/login')
 
   return (
     <div className="app-frame">

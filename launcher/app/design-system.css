@@ -51,26 +51,27 @@
 /* ---------- Dark (default when the system asks for dark) ---------- */
 :root,
 :root[data-theme="dark"] {
-  --canvas: #0b1014;
-  --canvas-alt: #0e1419;
-  --surface: #131b21;
-  --surface-2: #18222a;
-  --surface-3: #1f2b34;
-  --surface-inset: #0e161c;
-  --border: #25323b;
-  --border-soft: #1c262e;
-  --border-strong: #34454f;
+  color-scheme: dark;
+  --canvas: #0d141b;
+  --canvas-alt: #111c25;
+  --surface: #172531;
+  --surface-2: #1d2d3a;
+  --surface-3: #263947;
+  --surface-inset: #101b24;
+  --border: #304554;
+  --border-soft: #243744;
+  --border-strong: #486171;
 
-  --text: #e9eff2;
-  --text-2: #b9c6cc;
-  --text-3: #8b9aa2;
-  --text-4: #66757d;
+  --text: #f2f7f9;
+  --text-2: #c9d6dc;
+  --text-3: #9eafb8;
+  --text-4: #728792;
 
-  --accent: #3ddcb7;
-  --accent-strong: #57e6c5;
-  --accent-ink: #04231c;
-  --accent-soft: #122f29;
-  --accent-line: #1d5c4f;
+  --accent: #41d8b4;
+  --accent-strong: #66e8ca;
+  --accent-ink: #052720;
+  --accent-soft: #123c35;
+  --accent-line: #287d6d;
 
   --info: #7fb7e8;
   --info-soft: #142430;
@@ -330,7 +331,26 @@ label { display: grid; gap: var(--s-2); color: var(--text-3); font-size: var(--t
   padding: var(--s-5) var(--s-3) var(--s-3);
   border-inline-end: 1px solid var(--border-soft);
   background: var(--canvas-alt);
+  transition: width .2s var(--ease), flex-basis .2s var(--ease), padding .2s var(--ease);
 }
+
+.sidebar-collapse-button {
+  position: absolute;
+  inset-block-start: var(--s-5);
+  inset-inline-end: var(--s-3);
+  z-index: 1;
+  display: grid;
+  width: 28px;
+  min-height: 28px;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--text-3);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+.sidebar-collapse-button svg { transition: transform .2s var(--ease); }
+.sidebar-navigation { display: grid; min-height: 0; flex: 1 1 auto; align-content: start; overflow-y: auto; padding-inline-end: 2px; }
 
 .brand { display: flex; align-items: center; gap: var(--s-3); margin: 0 var(--s-2) var(--s-6); }
 .brand-mark {
@@ -402,6 +422,19 @@ label { display: grid; gap: var(--s-2); color: var(--text-3); font-size: var(--t
 .sidebar-footer strong { font-size: var(--t-xs); }
 .sidebar-footer small { color: var(--text-4); font-size: var(--t-2xs); }
 .local-status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.sidebar.is-collapsed { width: 76px; flex-basis: 76px; padding-inline: var(--s-2); }
+.sidebar.is-collapsed .brand { justify-content: center; margin-inline: 0; }
+.sidebar.is-collapsed .sidebar-collapse-button { inset-inline-start: 50%; inset-inline-end: auto; transform: translateX(-50%); }
+.sidebar.is-collapsed .brand-copy,
+.sidebar.is-collapsed .nav-caption,
+.sidebar.is-collapsed .side-link span,
+.sidebar.is-collapsed .sidebar-footer div,
+.sidebar.is-collapsed .local-status-dot { display: none; }
+.sidebar.is-collapsed .sidebar-collapse-button svg { transform: rotate(180deg); }
+.sidebar.is-collapsed .side-link { justify-content: center; padding-inline: 0; }
+.sidebar.is-collapsed .nav-active-mark { inset-inline-start: auto; inset-inline-end: 0; }
+.sidebar.is-collapsed .sidebar-footer { justify-content: center; padding-inline: 0; }
 
 .workspace { min-width: 0; flex: 1; }
 

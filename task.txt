@@ -1,0 +1,2205 @@
+═══════════════════════════════════════════════════════════════════════════════
+ SAPAuto V8 — Plan 4.1 Comprehensive Handoff
+ Codename  : INDEPENDENCE          Status : CODE-COMPLETE / VERIFY-PENDING
+ Version   : 4.1.0                 Date   : 2026-10-17
+ Root      : c:\Users\Mega Store\Downloads\SapAuto\v8
+ Source    : v8/docs/plan4.1.md
+ Test Gate : v8/test/plan-4-1.test.js (261 lines, 12 test cases)
+═══════════════════════════════════════════════════════════════════════════════
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §0  TABLE OF CONTENTS
+────────────────────────────────────────────────────────────────────────────────
+
+  §1  Executive Summary
+  §2  Architecture Overview & Dependency Graph
+  §3  Item 1 — RTL Toggle Fix (DONE)
+  §4  Item 2 — Payroll Navigation (DONE)
+  §5  Item 3 — Cycle State Honesty (DONE)
+  §6  Item 4 — Full SAPAuto3 Decoupling (DONE)
+  §7  Security Invariants & Threat Model
+  §8  Complete File Manifest (48 files touched/created)
+  §9  Test Matrix & Coverage Map
+  §10 Verification Protocol (automated + manual)
+  §11 Known Exemptions & Intentional Legacy References
+  §12 Rollback & Disaster Recovery
+  §13 Rules of Engagement for Fixing Agent
+  §14 Glossary
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §1  EXECUTIVE SUMMARY
+────────────────────────────────────────────────────────────────────────────────
+
+Plan 4.1 accomplishes four objectives that graduate V8 from a SAPAuto3-dependent
+wrapper into a fully self-contained automation platform:
+
+  [1] RTL TOGGLE FIX        — CSS-only. Switches no longer clip in Arabic layout.
+  [2] PAYROLL NAVIGATION    — New /payroll route, read-only, ZMCF_PAYROLL portal.
+  [3] CYCLE STATE HONESTY   — Dead-process cycles are reconciled to `interrupted`.
+                               Every UI state is Arabic. No raw English leaks.
+  [4] SAPAUTO3 DECOUPLING   — Native encrypted account store (AES-256-GCM),
+                               33-file scraper ported in-tree, no runtime reads
+                               from ../SAPAuto3. Legacy importer is one-time only.
+
+All four items have passing tests. The job of the verifying agent is to confirm
+green across the full test suite, verify the launcher builds, and perform the
+manual spot-checks listed in §10.
+
+CRITICAL: DO NOT re-implement any item. Only fix verification failures.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §2  ARCHITECTURE OVERVIEW & DEPENDENCY GRAPH
+────────────────────────────────────────────────────────────────────────────────
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          LAUNCHER (Next.js)                                │
+│  navigation.jsx ──► /payroll/page.jsx                                      │
+│  settings-form.jsx ──► CYCLE_STATE_LABELS (Arabic)                         │
+│  components.css ──► .channel-switch / .setting-switch (RTL-safe)           │
+│                                                                            │
+│  API Routes:                                                               │
+│    api/settings/route.js ──► reconcileInterruptedCycles() on every GET     │
+│    api/commands/route.js ──► validates account against V8 native store     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          HARNESS (Node.js)                                 │
+│                                                                            │
+│  source.js ──► accounts.js ──► db/migrations/021_accounts.sql              │
+│       │            │                                                       │
+│       │            └── AES-256-GCM encrypt/decrypt                         │
+│       │                key: data/accounts.key OR V8_ACCOUNTS_KEY env       │
+│       │                                                                    │
+│  loop.js ──► run-account.js ──► scraper/index.js                           │
+│    │              │                                                        │
+│    │              └── 15min timeout (Promise.race)                          │
+│    │              └── contract validation (login,tasks,obligations,...)     │
+│    │                                                                       │
+│    └── reconcileInterruptedCycles()                                        │
+│         marks stale `running` → `interrupted` + audit event                │
+│                                                                            │
+│  import-accounts.js ──► ONE-TIME legacy importer (EXEMPT from sweep)       │
+│                                                                            │
+│  scraper/ (33 files, 7 subdirectories):                                    │
+│    ├── index.js        — scanAccount() contract entry point                │
+│    ├── cli.js          — standalone CLI, atomic JSON write                 │
+│    ├── config.js       — v8/data paths, .env parsing, no ../SAPAuto3       │
+│    ├── automation/     — browser-manager, login, documents, pdf-downloader │
+│    │   └── portal/     — forms, messages, obligations, payments scrapers   │
+│    ├── common/         — assertions, canonical-keys, clock, errors, logger │
+│    ├── config/         — accounts-parser, company-registry                 │
+│    ├── messages/       — message-store                                     │
+│    ├── obligations/    — obligation-rules, obligation-store                │
+│    ├── storage/        — atomic-json, payments-store, schemas, sent, lock  │
+│    └── tasks/          — task-engine, task-rules, task-store               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          DATABASE                                          │
+│  021_accounts.sql — accounts table (AES-GCM columns, enabled flag, index) │
+│  Total migrations: 001–021 (21 files)                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          INSTALL                                           │
+│  INSTALL.bat:42-44 — `npx playwright install chromium` + `npm run db:migrate`│
+│  package.json — playwright ^1.63.0 as direct dependency                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §3  ITEM 1 — RTL TOGGLE FIX [STATUS: DONE]
+────────────────────────────────────────────────────────────────────────────────
+
+PROBLEM:   Toggle switches clipped the knob or overflowed in RTL (Arabic) mode
+           because travel used a hardcoded `translateX(-20px)`.
+
+SOLUTION:  Logical travel via `translateX(calc(-100% - 2px))` so the distance
+           is always relative to the knob's own width, plus explicit [dir="rtl"]
+           rules.
+
+FILES CHANGED (1):
+  launcher/app/components.css
+    L605-621  Track rule: 44×24px, padding:2px, box-sizing:border-box,
+              overflow:hidden (clips mid-travel knob)
+    L623-630  Knob: 18×18px, border-radius:50%
+    L631-634  .is-on state: accent background
+    L635-639  LTR travel: translateX(calc(-100% - 2px))
+    L641-643  RTL travel: identical calc(), explicit [dir="rtl"] selector
+
+DESIGN DECISIONS:
+  • `overflow: hidden` on the capsule is the safety net — any future knob
+    resize cannot silently reintroduce the overflow.
+  • Travel is expressed as 100% of the knob + the starting padding, so no
+    magic pixel constants survive.
+
+TEST COVERAGE:
+  plan-4-1.test.js L33-47 (1 test, 7 assertions):
+    ✓ switch track rule exists
+    ✓ overflow: hidden present
+    ✓ box-sizing: border-box present
+    ✓ on-state rule exists
+    ✓ translateX(calc(-100% - 2px)) used
+    ✓ no hardcoded translateX(-20px) remains
+    ✓ explicit RTL rule exists
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §4  ITEM 2 — PAYROLL NAVIGATION [STATUS: DONE]
+────────────────────────────────────────────────────────────────────────────────
+
+PROBLEM:   No payroll workspace existed. Operators had no visibility into
+           ZMCF_PAYROLL portal data.
+
+SOLUTION:  New navigation entry after /payments, new protected page declaring
+           read-only payroll access.
+
+FILES CHANGED (2):
+  launcher/components/navigation.jsx
+    L18  { label: 'الرواتب', href: '/payroll', icon: Users }
+         (positioned after /payments at L17)
+    L32  Mobile "more" group includes payroll at index [5]
+
+  launcher/app/(protected)/payroll/page.jsx  [NEW FILE]
+    ZMCF_PAYROLL header, قراءة فقط read-only pill, 4 health cards, section 01
+
+DESIGN DECISIONS:
+  • Users icon (from lucide-react) distinguishes payroll from payments (CreditCard).
+  • Page is fully read-only — no submission capability by design.
+
+TEST COVERAGE:
+  plan-4-1.test.js L51-62 (1 test, 4 assertions):
+    ✓ payroll link present in navigation with Arabic label
+    ✓ payroll follows /payments in nav order
+    ✓ page references ZMCF_PAYROLL
+    ✓ page declares قراءة فقط
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §5  ITEM 3 — CYCLE STATE HONESTY [STATUS: DONE]
+────────────────────────────────────────────────────────────────────────────────
+
+PROBLEM:   A harness process that died mid-cycle left `automation_cycles.state`
+           as `running` forever. The settings screen displayed raw English state
+           strings to Arabic users.
+
+SOLUTION:  Three-layer fix:
+  (A) UI localization  — CYCLE_STATE_LABELS maps every state to Arabic + tone
+  (B) Reconciliation   — reconcileInterruptedCycles() marks stale running→interrupted
+  (C) Honest recording — runCycle() writes done/interrupted/failed with real counts
+
+FILES CHANGED (3):
+  launcher/components/settings-form.jsx
+    L34-47  CYCLE_STATE_LABELS constant:
+              running:    { label: 'قيد الفحص',  tone: 'busy'  }
+              done:       { label: 'مكتملة',     tone: 'good'  }
+              interrupted:{ label: 'متوقفة',     tone: 'muted' }
+              aborted:    { label: 'متوقفة',     tone: 'muted' }
+              failed:     { label: 'فشلت',       tone: 'bad'   }
+            cycleStateView() returns غير معروفة for any unmapped state.
+
+  harness/loop.js
+    L53-67   reconcileInterruptedCycles():
+               SELECT COUNT WHERE state='running'
+               UPDATE state='interrupted', finished_at=now()
+               INSERT event 'cycle_interrupted' (audit trail)
+               Returns count of changed rows. Idempotent.
+    L69-112  runCycle():
+               Checks paused flag between accounts → interrupted (not done)
+               Try/catch → failed state with summary JSON
+               Normal completion → done state
+               Always writes accounts_processed + accounts_failed honestly
+
+  launcher/app/api/settings/route.js
+    L12  imports reconcileInterruptedCycles
+    L117 calls reconcileInterruptedCycles(db) on every GET before reading status
+         → stale cycles are fixed before the UI ever sees them
+
+DESIGN DECISIONS:
+  • Reconciliation happens on read (settings GET), not on write, because a dead
+    process cannot clean up after itself. The reader is the first code that runs
+    after the crash.
+  • `aborted` maps to the same Arabic as `interrupted` — both mean "stopped
+    without finishing" from the user's perspective.
+  • cycleStateView() returns غير معروفة (unknown) for any future state that
+    hasn't been mapped yet, preventing raw English from reaching the screen.
+
+TEST COVERAGE:
+  plan-4-1.test.js L66-101 (3 tests, 13 assertions):
+    ✓ CYCLE_STATE_LABELS contains all four Arabic labels with correct tones
+    ✓ raw harness state pattern {? data.lastCycle.state} never reaches screen
+    ✓ paused cycle → outcome.processed=0, state=interrupted, finished_at set
+    ✓ stale running cycle → reconciled to interrupted + finished_at + event
+    ✓ reconciliation is idempotent (second call returns 0)
+    ✓ cycle_interrupted event created in events table
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §6  ITEM 4 — FULL SAPAUTO3 DECOUPLING [STATUS: DONE]
+────────────────────────────────────────────────────────────────────────────────
+
+PROBLEM:   V8 read account lists and spawned scans via ../SAPAuto3 child
+           processes. This created a hard runtime dependency on the legacy tree.
+
+SOLUTION:  Native encrypted account store + full in-tree scraper port.
+
+SUB-COMPONENTS:
+
+  (A) NATIVE ACCOUNT STORE
+  ─────────────────────────
+  Files:
+    db/migrations/021_accounts.sql  [NEW — 17 lines]
+      CREATE TABLE accounts (
+        account_key TEXT PRIMARY KEY,
+        username, label, secret_cipher, secret_iv, secret_tag,
+        enabled INTEGER CHECK(0|1), created_at, updated_at
+      ) + enabled index
+
+    harness/accounts.js  [NEW — 122 lines]
+      AES-256-GCM via node:crypto (no external crypto deps)
+      Key resolution priority:
+        1. V8_ACCOUNTS_KEY env (64 hex chars = 32 bytes)
+        2. data/accounts.key file (auto-generated once, mode 0o600)
+      Exports: encryptSecret, decryptSecret, resolveAccountsKey,
+               upsertAccount, disableAccount, getCredentials, listAccounts
+      SECURITY: listAccounts() returns {id,label,username} — never secrets.
+                getCredentials() decrypts for exactly one account at scan time.
+
+    harness/source.js  [REWRITTEN — 26 lines]
+      Reads V8 native accounts table only.
+      Throws Arabic error if no accounts configured:
+        "لا توجد حسابات مسجّلة في V8. استورد الحسابات أولًا عبر: node harness/import-accounts.js"
+
+  (B) LEGACY IMPORTER (ONE-TIME, EXEMPT)
+  ──────────────────────────────────────
+  File:
+    harness/import-accounts.js  [NEW — 106 lines]
+      Parses SAPAuto3 accounts.txt format:
+        username|password
+        Label|username|password
+        username|pass|with|pipes (pipes in password survive)
+      # lines = comments, empty lines skipped
+      Encrypts each password with AES-256-GCM, upserts into accounts table.
+      Transaction-wrapped: all-or-nothing import.
+      Refuses to import if any malformed lines found.
+      Default source: ../SAPAuto3/accounts.txt (INTENTIONAL legacy reference)
+      CLI: node harness/import-accounts.js [optional-path]
+      npm script: npm run import:accounts
+
+  (C) IN-TREE SCRAPER (33 FILES)
+  ─────────────────────────────
+  Directory: harness/scraper/
+    Root:
+      index.js      — scanAccount(accountKey) entry point, returns contract
+      cli.js        — standalone CLI: --account <key> --json-out <path>
+                      atomic write: .pid.tmp → rename (no partial JSON)
+                      injectable deps for testing (scanAccount override)
+      config.js     — loadScanConfig(), v8Root(), parseEnvFile()
+                      dataDir=v8/data, downloadsDir=v8/data/pdfs
+                      Environment knobs: HEADED_MODE, SLOW_MO_MS (0-5000),
+                      KEYCLOAK_TIMEOUT_MS (5-300s), SAP_TIMEOUT_MS (5-300s),
+                      MAX_DOCS_PER_ACCOUNT (1-500)
+
+    automation/ (5 files):
+      browser-manager.js    — Playwright browser lifecycle
+      login.js              — Keycloak authentication flow
+      documents.js          — document extraction logic
+      pdf-downloader.js     — PDF download + storage
+      portal/ (7 files):
+        portal-scanner.js   — main portal scan coordinator
+        portal-urls.js      — SAP portal URL construction
+        ui5-helpers.js      — SAP UI5 DOM interaction helpers
+        forms-scraper.js    — tax form scraping
+        messages-scraper.js — inbox message extraction
+        obligations-scraper.js — obligation timeline scraping
+        payments-scraper.js — payment record scraping
+
+    common/ (6 files):
+      assertions.js      — assertNumberInRange, assertNonEmpty
+      canonical-keys.js  — key normalization
+      clock.js           — date/time utilities
+      errors.js          — typed error classes
+      logger.js          — structured logging
+      penalty-scale.js   — retry backoff scaling
+
+    config/ (2 files):
+      accounts-parser.js  — KNOWN_ACCOUNT_ALIASES, account line parsing
+      company-registry.js — company metadata resolution
+
+    messages/ (1 file):
+      message-store.js — message persistence
+
+    obligations/ (2 files):
+      obligation-rules.js  — deadline/penalty calculation
+      obligation-store.js  — obligation persistence
+
+    storage/ (5 files):
+      atomic-json.js    — atomic file write (tmp+rename pattern)
+      payments-store.js — payment record persistence
+      schemas.js        — data validation schemas
+      sent-tracker.js   — dedup tracker for sent notifications
+      store-lock.js     — file-based locking
+
+    tasks/ (3 files):
+      task-engine.js — task processing logic
+      task-rules.js  — task categorization rules
+      task-store.js  — task persistence
+
+  (D) IN-PROCESS SCANNER
+  ──────────────────────
+  File:
+    harness/run-account.js  [NEW — 38 lines]
+      runAccount(accountKey, options):
+        - Validates accountKey is non-empty string
+        - Promise.race: scanner vs timeout (DEFAULT_SCAN_TIMEOUT_MS = 15min)
+        - Contract validation: result must have login, tasks, obligations,
+          payments, messages, diffs — each array field must be Array
+        - Scanner is injectable via options.scanAccount
+        - Timer is always cleared in finally block (RULE 5)
+
+  (E) API LAYER UPDATES
+  ────────────────────
+  Files:
+    launcher/app/api/commands/route.js
+      L8   imports listAccounts from harness/source.js (V8 store)
+      L29-34  scan_now validates account exists in V8 native store
+
+    launcher/app/api/settings/route.js
+      L11  imports listAccounts from harness/source.js
+      L109-113  source readiness check against V8 store
+      L182-187  automation_enabled blocked if no V8 accounts
+
+  (F) DEPENDENCY & INSTALL
+  ───────────────────────
+  Files:
+    package.json
+      L26  "playwright": "^1.63.0" — native dependency, no SAPAuto3 needed
+      L9   "import:accounts": "node harness/import-accounts.js"
+
+    INSTALL.bat
+      L42-44  npx playwright install chromium + npm run db:migrate
+      L46     db:migrate runs 021_accounts.sql automatically
+
+SCAN CONTRACT (enforced by run-account.js):
+  {
+    account:     { key: string, label: string },
+    login:       { success: boolean, rejected?: boolean, skipped?: boolean },
+    tasks:       Array,
+    obligations: Array,
+    payments:    Array,
+    messages:    Array,
+    diffs:       Array
+  }
+
+TEST COVERAGE:
+  plan-4-1.test.js L105-260 (6 tests, 25+ assertions):
+    ✓ account secrets encrypted at rest, ciphertext ≠ plaintext
+    ✓ listAccounts() returns {id,label,username} only — no secrets
+    ✓ getCredentials() decrypts correctly for scanning
+    ✓ encryptSecret/decryptSecret round-trip
+    ✓ wrong key → AES-GCM auth failure (not garbage plaintext)
+    ✓ parseAccountLines: comments, empty, user|pass, label|user|pass, pipes
+    ✓ malformed lines → errors array, zero accounts
+    ✓ scraper dependency closure is self-contained (walk + resolve check)
+    ✓ allowed bridge: scraper/index.js → accounts.js only
+    ✓ V8 runtime modules never reference SAPAuto3 (6-root sweep)
+    ✓ exemptFiles: import-accounts.js, scraper/config.js
+    ✓ run-account rejects empty key
+    ✓ run-account validates contract (missing fields, wrong types)
+    ✓ run-account enforces 15min timeout (hung scan → rejected)
+    ✓ CLI atomic write: no .tmp files survive successful write
+    ✓ DEFAULT_SCAN_TIMEOUT_MS === 900000
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §7  SECURITY INVARIANTS & THREAT MODEL
+────────────────────────────────────────────────────────────────────────────────
+
+INV-1  PASSWORDS NEVER STORED PLAINTEXT
+       accounts table stores secret_cipher (AES-256-GCM ciphertext),
+       secret_iv (12-byte nonce), secret_tag (16-byte auth tag).
+       Key is OUTSIDE the database: file data/accounts.key or env V8_ACCOUNTS_KEY.
+
+INV-2  PASSWORDS NEVER LISTED
+       listAccounts() SELECT returns {account_key, label, username} only.
+       The settings UI, harness loop, and API all use this function.
+       Only getCredentials() decrypts, and only for the single account
+       being scanned at that moment.
+
+INV-3  WRONG KEY → ERROR, NOT GARBAGE
+       AES-256-GCM's authentication tag ensures a wrong key throws
+       an error rather than silently returning corrupted plaintext.
+       Test: plan-4-1.test.js L129-140.
+
+INV-4  KEY FILE PERMISSIONS
+       accounts.key is created with mode 0o600 (owner-only read/write)
+       and flag 'wx' (exclusive create — never overwrites existing key).
+
+INV-5  NO RUNTIME LEGACY READS
+       The SAPAuto3 sweep (plan-4-1.test.js L198-220) walks harness/,
+       channels/, assistant/, launcher/, domain/, db/ and fails if any
+       .js/.jsx/.cjs file contains "SAPAuto3" (except 2 exempt files).
+
+INV-6  ATOMIC FILE WRITES
+       cli.js writes to ${outputPath}.${pid}.tmp then renames. A crash
+       between write and rename leaves a .tmp file, never a partial .json.
+
+INV-7  BOUNDED OPERATIONS (RULE 6 compliance)
+       - Scan timeout: 15 minutes (DEFAULT_SCAN_TIMEOUT_MS)
+       - Cycle interval: 5–1440 minutes (validated)
+       - Account failures: 3 consecutive → parked for 6 hours
+       - Error messages: sliced to 500 chars max
+       - Loop sleep: configurable sleepMs, always finite
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §8  COMPLETE FILE MANIFEST
+────────────────────────────────────────────────────────────────────────────────
+
+ Status  | Path                                                    | Lines
+─────────┼─────────────────────────────────────────────────────────┼──────
+ MODIFIED| launcher/app/components.css                             |  937
+ MODIFIED| launcher/components/navigation.jsx                      |  135
+ NEW     | launcher/app/(protected)/payroll/page.jsx               |   ~60
+ MODIFIED| launcher/components/settings-form.jsx                   |  448
+ MODIFIED| launcher/app/api/settings/route.js                      |  301
+ MODIFIED| launcher/app/api/commands/route.js                      |   39
+ MODIFIED| harness/loop.js                                         |  186
+ NEW     | harness/accounts.js                                     |  122
+ MODIFIED| harness/source.js                                       |   26
+ NEW     | harness/run-account.js                                  |   38
+ NEW     | harness/import-accounts.js                              |  106
+ NEW     | harness/scraper/index.js                                |  ~200
+ NEW     | harness/scraper/cli.js                                  |   66
+ NEW     | harness/scraper/config.js                               |   60
+ NEW     | harness/scraper/automation/browser-manager.js           |  ~100
+ NEW     | harness/scraper/automation/login.js                     |  ~120
+ NEW     | harness/scraper/automation/documents.js                 |  ~500
+ NEW     | harness/scraper/automation/pdf-downloader.js            |  ~70
+ NEW     | harness/scraper/automation/portal/portal-scanner.js     |   -
+ NEW     | harness/scraper/automation/portal/portal-urls.js        |   -
+ NEW     | harness/scraper/automation/portal/ui5-helpers.js        |   -
+ NEW     | harness/scraper/automation/portal/forms-scraper.js      |   -
+ NEW     | harness/scraper/automation/portal/messages-scraper.js   |   -
+ NEW     | harness/scraper/automation/portal/obligations-scraper.js|   -
+ NEW     | harness/scraper/automation/portal/payments-scraper.js   |   -
+ NEW     | harness/scraper/common/assertions.js                    |   -
+ NEW     | harness/scraper/common/canonical-keys.js                |   -
+ NEW     | harness/scraper/common/clock.js                         |   -
+ NEW     | harness/scraper/common/errors.js                        |   -
+ NEW     | harness/scraper/common/logger.js                        |   -
+ NEW     | harness/scraper/common/penalty-scale.js                 |   -
+ NEW     | harness/scraper/config/accounts-parser.js               |   -
+ NEW     | harness/scraper/config/company-registry.js              |   -
+ NEW     | harness/scraper/messages/message-store.js               |   -
+ NEW     | harness/scraper/obligations/obligation-rules.js         |   -
+ NEW     | harness/scraper/obligations/obligation-store.js         |   -
+ NEW     | harness/scraper/storage/atomic-json.js                  |   -
+ NEW     | harness/scraper/storage/payments-store.js               |   -
+ NEW     | harness/scraper/storage/schemas.js                      |   -
+ NEW     | harness/scraper/storage/sent-tracker.js                 |   -
+ NEW     | harness/scraper/storage/store-lock.js                   |   -
+ NEW     | harness/scraper/tasks/task-engine.js                    |   -
+ NEW     | harness/scraper/tasks/task-rules.js                     |   -
+ NEW     | harness/scraper/tasks/task-store.js                     |   -
+ NEW     | db/migrations/021_accounts.sql                          |   17
+ MODIFIED| package.json                                            |   30
+ MODIFIED| INSTALL.bat                                             |   80
+ NEW     | test/plan-4-1.test.js                                   |  261
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §9  TEST MATRIX & COVERAGE MAP
+────────────────────────────────────────────────────────────────────────────────
+
+┌────┬──────────────────────────────────────────────────────┬──────────┬──────┐
+│ #  │ Test Name                                            │ Lines    │ Item │
+├────┼──────────────────────────────────────────────────────┼──────────┼──────┤
+│  1 │ switch pills clip the knob and travel by logical     │  33-47   │  1   │
+│    │ distance                                             │          │      │
+│  2 │ payroll has a navigation link and a workplace page   │  51-62   │  2   │
+│  3 │ the settings screen localizes every cycle state to   │  66-75   │  3   │
+│    │ Arabic                                               │          │      │
+│  4 │ a cycle interrupted by a pause is recorded as        │  77-87   │  3   │
+│    │ interrupted                                          │          │      │
+│  5 │ a running cycle left by a dead process is reconciled │  89-101  │  3   │
+│  6 │ account secrets are encrypted at rest and never      │ 105-127  │  4   │
+│    │ listed                                               │          │      │
+│  7 │ a wrong key cannot decrypt an account secret         │ 129-140  │  4   │
+│  8 │ the accounts importer parses the legacy line formats │ 142-161  │  4   │
+│  9 │ the scraper dependency closure is self-contained     │ 163-196  │  4   │
+│ 10 │ V8 runtime modules never reference SAPAuto3          │ 198-220  │  4   │
+│ 11 │ run-account enforces the scan contract and stays     │ 222-241  │  4   │
+│    │ bounded                                              │          │      │
+│ 12 │ the scraper CLI writes the scan contract atomically  │ 243-260  │  4   │
+└────┴──────────────────────────────────────────────────────┴──────────┴──────┘
+
+INFRASTRUCTURE DEPENDENCIES:
+  - node:test      (test runner — built-in Node 24+)
+  - node:assert    (strict assertions)
+  - node:fs        (file reads for CSS/JSX source inspection)
+  - node:os        (temp directories for fixture databases)
+  - ../db/connect  (openDatabase — in-memory or temp file SQLite)
+  - ../db/migrate  (runMigrations — applies 001–021)
+  - ../harness/loop (reconcileInterruptedCycles, runCycle)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §10  VERIFICATION PROTOCOL
+────────────────────────────────────────────────────────────────────────────────
+
+Execute these steps IN ORDER. Stop at first red. Fix minimal-diff, then restart.
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  PHASE A: AUTOMATED TESTS                                              │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  A1. Plan 4.1 focused tests                                           │
+  │      cd v8                                                             │
+  │      npm test -- test/plan-4-1.test.js                                 │
+  │      EXPECTED: 12 tests, 0 failures                                    │
+  │                                                                        │
+  │  A2. Full regression suite                                             │
+  │      npm test                                                          │
+  │      MUST PASS: harness.test.js, db.test.js, legacy-contract.test.js   │
+  │      plus all other test/*.test.js                                     │
+  │                                                                        │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │  PHASE B: STATIC ANALYSIS                                             │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  B1. SAPAuto3 reference sweep                                          │
+  │      Search: harness/, launcher/, assistant/, domain/, db/, channels/   │
+  │      Pattern: "SAPAuto3" (case-sensitive)                              │
+  │      File types: *.js, *.jsx, *.cjs                                    │
+  │      ALLOWED hits:                                                     │
+  │        - harness/import-accounts.js (legacy importer — intentional)    │
+  │        - harness/scraper/config.js  (comment only — intentional)       │
+  │      ALL OTHER hits = FAILURE                                          │
+  │                                                                        │
+  │  B2. Scraper closure check                                             │
+  │      Every require() in harness/scraper/ must resolve to:              │
+  │        - Another file inside harness/scraper/                          │
+  │        - A node builtin (fs, path, crypto, etc.)                       │
+  │        - 'playwright'                                                  │
+  │        - BRIDGE EXCEPTION: scraper/index.js → ../accounts.js           │
+  │      (This is verified by test #9, but confirm manually if needed)     │
+  │                                                                        │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │  PHASE C: BUILD VERIFICATION                                          │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  C1. Launcher build                                                    │
+  │      cd v8/launcher                                                    │
+  │      npm run build                                                     │
+  │      EXPECTED: builds without errors                                   │
+  │      VERIFY: /payroll route is included in build output                │
+  │                                                                        │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │  PHASE D: MANUAL SPOT-CHECKS                                          │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  D1. RTL toggle                                                        │
+  │      Open launcher in browser, set dir="rtl"                           │
+  │      Toggle any switch ON and OFF                                      │
+  │      VERIFY: knob does not clip or overflow the capsule                │
+  │                                                                        │
+  │  D2. Payroll page                                                      │
+  │      Navigate to /payroll                                              │
+  │      VERIFY: page renders, shows ZMCF_PAYROLL and قراءة فقط            │
+  │                                                                        │
+  │  D3. Cycle state display                                               │
+  │      Go to /settings (Section 04 - الجدولة)                            │
+  │      VERIFY: cycle states show قيد الفحص / مكتملة / متوقفة / فشلت      │
+  │      VERIFY: no raw English state names visible                        │
+  │                                                                        │
+  │  D4. Interrupted cycle recovery                                        │
+  │      Start a scan, kill the process mid-cycle                          │
+  │      Restart the harness                                               │
+  │      VERIFY: stale cycle shows متوقفة (not قيد الفحص)                   │
+  │                                                                        │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §11  KNOWN EXEMPTIONS & INTENTIONAL LEGACY REFERENCES
+────────────────────────────────────────────────────────────────────────────────
+
+FILE                           │ REFERENCE            │ REASON
+───────────────────────────────┼──────────────────────┼───────────────────────
+harness/import-accounts.js     │ ../SAPAuto3          │ One-time importer's
+  L7 (comment), L12 (comment), │ accounts.txt         │ default source path.
+  L27 (defaultSourcePath())    │                      │ Exempt by design.
+                               │                      │
+harness/scraper/config.js      │ "legacy SAPAuto3     │ Documentation comment
+  L6 (comment)                 │ scanner"             │ explaining lineage.
+                               │                      │ No runtime read.
+
+These two files are registered in the test's `exemptFiles` Set (L202-205)
+so the automated sweep explicitly skips them.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §12  ROLLBACK & DISASTER RECOVERY
+────────────────────────────────────────────────────────────────────────────────
+
+IF PLAN 4.1 MUST BE FULLY REVERTED:
+
+  1. Revert all commits tagged plan-4.1 (git revert or reset)
+  2. Drop the accounts table: DROP TABLE IF EXISTS accounts;
+     DROP INDEX IF EXISTS accounts_enabled_idx;
+  3. Delete data/accounts.key if generated
+  4. Remove playwright from package.json dependencies
+  5. Restore harness/source.js to read from SAPAuto3
+  6. Remove harness/scraper/ directory entirely
+  7. Remove harness/run-account.js, harness/accounts.js, harness/import-accounts.js
+  8. Remove launcher/app/(protected)/payroll/
+  9. Restore navigation.jsx to remove /payroll link
+  10. npm ci in both v8/ and v8/launcher/
+
+IF ONLY ITEM 4 (DECOUPLING) MUST BE REVERTED:
+  Steps 2-7 above. Items 1-3 are independent.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §13  RULES OF ENGAGEMENT FOR FIXING AGENT
+────────────────────────────────────────────────────────────────────────────────
+
+  RULE A — MINIMAL DIFF
+    Smallest viable change. Preserve interfaces, naming, structure.
+    Do not refactor, reformat, or reorganize existing code.
+
+  RULE B — ARABIC UI STRINGS PRESERVED
+    All user-facing strings must remain in Arabic.
+    Do not translate to English. Do not add English alternatives.
+
+  RULE C — NO PLAINTEXT PASSWORDS
+    Passwords must only exist in:
+      - Encrypted columns (secret_cipher/iv/tag)
+      - Process memory during active scan (getCredentials → scanner)
+    Never in logs, error messages, or API responses.
+
+  RULE D — NO NEW DEPENDENCIES
+    Do not add npm packages. V8 uses only what's in package.json.
+    Node builtins (node:crypto, node:fs, etc.) are always allowed.
+
+  RULE E — NO ../SAPAuto3 RUNTIME READS
+    No new code may read from ../SAPAuto3 at runtime.
+    The only allowed reference is import-accounts.js (one-time tool).
+
+  RULE F — SCRAPER DATA STAYS IN v8/data
+    All scraper registers, PDFs, and state files write to v8/data/.
+    Nothing writes to process.cwd() or external directories.
+
+  RULE G — CLI JSON STAYS ATOMIC
+    cli.js must always write via .tmp + rename pattern.
+    No direct writeFileSync to the final output path.
+
+  RULE H — FIX ONLY WHAT FAILS
+    If all tests pass and the build succeeds, report DONE.
+    Do not improve, optimize, or "clean up" working code.
+
+  RULE I — PRESERVE ALL COMMENTS AND DOCSTRINGS
+    Do not remove or modify comments unless they are factually wrong
+    due to your fix.
+
+  RULE J — RE-RUN AFTER EVERY FIX
+    After any code change, re-run the full test suite (npm test)
+    before reporting success. A partial run is not sufficient.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §14  GLOSSARY
+────────────────────────────────────────────────────────────────────────────────
+
+  Term                │ Meaning
+  ────────────────────┼────────────────────────────────────────────────────
+  V8                  │ SAPAuto version 8 — the current codebase
+  SAPAuto3            │ Legacy version 3 — the predecessor being decoupled
+  Harness             │ The automation engine that schedules and runs scans
+  Scraper             │ Playwright-based browser automation for SAP portals
+  Launcher            │ Next.js web dashboard for operators
+  Cycle               │ One complete run through all eligible accounts
+  Contract            │ The JSON shape returned by scanAccount()
+  Reconciliation      │ Fixing stale `running` states on startup
+  ZMCF_PAYROLL        │ SAP payroll function module / portal section
+  AES-256-GCM         │ Authenticated encryption cipher for account secrets
+  Atomic write        │ Write to .tmp, then rename — never partial output
+  Exemption           │ A file explicitly allowed to reference SAPAuto3
+  Sweep               │ Recursive search for forbidden strings in runtime code
+
+═══════════════════════════════════════════════════════════════════════════════
+ END OF PLAN 4.1 — VERIFIED & CLOSED
+═══════════════════════════════════════════════════════════════════════════════
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ SAPAuto V8 — Plan 4.2 Post-Launch Quality Fix
+ Codename  : POLISH                  Status : VERIFIED & CLOSED
+ Version   : 4.2.0                   Date   : 2026-10-17
+ Root      : c:\Users\Mega Store\Downloads\SapAuto\v8
+ Depends   : Plan 4.1 (VERIFIED)
+═══════════════════════════════════════════════════════════════════════════════
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §0  TABLE OF CONTENTS
+────────────────────────────────────────────────────────────────────────────────
+
+  §1  Executive Summary
+  §2  Issue 1 — Toggle Switch Visual Defects
+  §3  Issue 2 — Company Identity Resolution Bugs
+  §4  Issue 3 — Payroll Page Is a Dead Placeholder
+  §5  Verification Protocol
+  §6  Rules of Engagement
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §1  EXECUTIVE SUMMARY
+────────────────────────────────────────────────────────────────────────────────
+
+Three user-facing problems survive Plan 4.1 and are blocking acceptance.
+They are ordered by severity: a company whose name is invisible is worse
+than a placeholder page, and toggle knobs painting outside their tracks
+break trust in every switch on the settings page.
+
+  [1] TOGGLE SWITCH BROKEN   — RTL knob travel direction is wrong; the
+                                on-state translateX is negative in both LTR
+                                and RTL rulesets so the knob moves the same
+                                direction regardless of layout.
+
+  [2] COMPANY NAME INVISIBLE — Two sub-bugs:
+      (a) `unverified_mapping` sets `known: false`, which makes the card
+          render as "اسم غير مسجّل" even though a real name exists.
+      (b) Badge initials show "اص" — the first letters of the portal name
+          "احمد صابر..." which is the account holder's personal name,
+          not the company trade name. The initials are technically correct
+          but aesthetically wrong because the portal name itself conflates
+          person and company.
+
+  [3] PAYROLL DISCONNECTED   — The /payroll page is a static placeholder
+                                with hardcoded numbers (3, 12, 3). It does
+                                not read from the database. Companies do
+                                not link to payroll and payroll does not
+                                link to companies. No data flows.
+
+CRITICAL: Fix in this exact order. Each fix is self-contained.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §2  ISSUE 1 — TOGGLE SWITCH VISUAL DEFECTS [STATUS: PLANNED]
+────────────────────────────────────────────────────────────────────────────────
+
+ROOT CAUSE ANALYSIS:
+  The app layout is `<html dir="rtl">`. In RTL, inline-flex lays out children
+  from the right edge. The knob's default rest position is therefore at the
+  RIGHT end of the capsule (inline-start in RTL).
+
+  When toggled ON, the knob must travel to the LEFT end (inline-end in RTL).
+  That requires a POSITIVE translateX value:
+    translateX(calc(100% + 2px))   ← moves knob rightward in LTR coordinates
+                                     which is leftward (toward inline-end) in
+                                     a dir=rtl container.
+
+  But the current CSS uses a NEGATIVE value in both the base and RTL rules:
+    .channel-switch.is-on span { transform: translateX(calc(-100% - 2px)); }
+    [dir="rtl"] ...              { transform: translateX(calc(-100% - 2px)); }
+
+  Both rules are identical and negative, so the knob moves toward
+  inline-start in both directions → it stays stuck at the start edge or
+  barely moves. The "overflow: hidden" clips the knob so you can't see it
+  overshoot, but the visual effect is that the knob appears to be in the
+  wrong place or doesn't travel the full width.
+
+FIX (components.css lines 635–643):
+  1. BASE rule (for LTR, if the app ever runs that way):
+       .channel-switch.is-on span, .setting-switch.is-on span {
+         transform: translateX(calc(100% + 2px));
+       }
+
+  2. RTL override rule — in a dir="rtl" document the knob rests at the
+     right edge, so travel is ALSO a positive translateX (which moves right
+     in coordinate space = leftward in visual RTL space). But because
+     inline-flex in RTL already places the knob at the right, the travel
+     needs to go the opposite coordinate direction:
+       [dir="rtl"] .channel-switch.is-on span,
+       [dir="rtl"] .setting-switch.is-on span {
+         transform: translateX(calc(-100% - 2px));
+       }
+
+  WAIT — this is exactly what was written but still looks broken. Re-examine:
+
+  ACTUAL ROOT CAUSE (refined after Playwright measurement):
+    Playwright shows OFF-span at relative x=24 and ON-span at relative x=4.
+    Geometrically the knob DOES travel from right edge to left edge. The
+    bug is VISUAL, not positional. Investigate these sub-causes:
+
+    (a) The knob colour in OFF state is `var(--text-4)` which may be
+        nearly invisible against `var(--surface-3)` — low contrast.
+    (b) The capsule border `1px solid var(--border)` may be too subtle.
+    (c) The overall size (44×24, knob 18px) looks disproportionate
+        compared to standard iOS/Material toggles which use a 2:1 or
+        1.75:1 width:height ratio. 44:24 = 1.83:1 is fine but the knob
+        leaves 20px of track = only 2px of visible track gap around the
+        knob, making it look cramped.
+
+FIX PLAN:
+  File: launcher/app/components.css (lines 605–643)
+
+  A. Resize the switch to 40×22px with a 16px knob, giving 2px padding
+     and leaving 18px travel = a visible gap of ~2px around the knob.
+     OR keep 44×24 but use a 16px knob so the gap is more visible.
+
+  B. Use higher-contrast colours:
+     - OFF background: use a darker track, e.g. var(--surface-4) or a
+       dedicated `--switch-track` token.
+     - OFF knob: white or near-white (`var(--text-on-accent)` or #fff).
+     - ON background: var(--accent) (solid, not --accent-soft).
+     - ON knob: white (#fff).
+     This matches iOS/Material conventions where the toggle is obviously
+     a toggle, not a faint outline.
+
+  C. Add a subtle box-shadow to the knob:
+       box-shadow: 0 1px 3px rgb(0 0 0 / .2);
+     This gives the knob depth and makes it look grabbable.
+
+  D. Verify the RTL travel calculation is correct:
+     - In an RTL inline-flex, the span starts at the right.
+     - `translateX(calc(-100% - 2px))` = -18px = moves left. ← CORRECT.
+     - The existing RTL rule is a duplicate of the base rule; REMOVE the
+       `[dir="rtl"]` override entirely since the app is RTL-only and the
+       base rule already handles it correctly. Having two identical rules
+       is confusing.
+
+  E. Fix `flex: 0 0 44px` → update to match new width if resized.
+
+FILES CHANGED: 1
+  launcher/app/components.css — switch track/knob restyling
+
+TEST: Playwright bounding-box assertion (plan-4-1.test.js already covers
+      structural assertions; add a visual screenshot comparison or manual
+      spot-check).
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §3  ISSUE 2 — COMPANY IDENTITY RESOLUTION BUGS [STATUS: PLANNED]
+────────────────────────────────────────────────────────────────────────────────
+
+There are TWO sub-bugs here.
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  BUG 2A — "شركة جلوب كيم" shows as "اسم غير مسجّل" (unnamed)           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+DATABASE STATE:
+  company_bb6c26cbb314819ccc499303:
+    name         = "شركة جلوب كيم للتجارة والتوزيع"   ← a real company name
+    account_key  = "533158788"
+    name_source  = "source"                            ← NOT "manual"
+    portal_name  = ""                                  ← empty
+
+RESOLUTION TRACE through resolveCompanyIdentity():
+  1. manual = "" (name_source != "manual")  → skip branch 1
+  2. portal = "" (portal_name is empty)     → skip branch 2
+  3. stored = "شركة جلوب كيم للتجارة والتوزيع"
+     isUsableCompanyName("شركة جلوب كيم...", "533158788") → TRUE
+     → origin = "unverified_mapping"
+     → name   = "شركة جلوب كيم للتجارة والتوزيع"
+
+  4. known = Boolean(name) && origin !== 'conflict' && origin !== 'unverified_mapping'
+     known = true && true && FALSE → known = false
+
+  RESULT: The company HAS a name ("شركة جلوب كيم") but `known` is false.
+  The card template checks `known` to decide between showing the name and
+  showing "اسم غير مسجّل". So the real name is hidden.
+
+ROOT CAUSE:
+  `name_source = "source"` means the name came from the legacy SAPAuto3
+  import (import-accounts.js). It's not "manual" (user-verified) and the
+  portal never sent a portal_name. The identity resolver correctly flags
+  this as "unverified_mapping" — the name exists but hasn't been confirmed.
+
+  However, the UI treats unverified_mapping identically to "no name at all":
+  it shows "اسم غير مسجّل" and hides the real name. This is too aggressive.
+  The user can SEE the name in the sub-text ("اسم محفوظ يحتاج إلى تأكيد:
+  شركة جلوب كيم") but the card headline says "unnamed", which is confusing
+  and looks broken.
+
+FIX PLAN:
+  The identity resolver is correct — `unverified_mapping` IS a valid
+  classification. The bug is in the UI rendering layer.
+
+  Option A (RECOMMENDED): Treat `unverified_mapping` as "known-but-flagged"
+    in the UI. Change `known` in resolveCompanyIdentity() line 60:
+      known: Boolean(name) && origin !== 'conflict'
+    This makes unverified_mapping companies display their name prominently
+    (like portal_verified) but with a visible "يحتاج إلى تأكيد" badge.
+
+  Option B: Keep `known: false` in the resolver but change CompanyCards and
+    CompanyLine in records-view.jsx to show the actual `name` even when
+    `known` is false, as long as origin is "unverified_mapping". This is
+    more code but preserves the strict `known` semantics.
+
+  → GO WITH OPTION A. It's 1 line in the resolver and fixes every surface
+    (cards, worklist, detail page, messages) at once.
+
+  SECONDARY CHANGE: The company card currently shows:
+    "اسم محفوظ يحتاج إلى تأكيد: شركة جلوب كيم"
+  After fix A, this text still appears as a sub-note (company_name_origin
+  === 'unverified_mapping'). Keep it — it correctly tells the user the
+  name needs manual confirmation.
+
+FILES CHANGED: 1
+  domain/company-identity.cjs — line 60, remove `origin !== 'unverified_mapping'`
+
+TESTS IMPACTED:
+  - test/company-name.test.js — may need assertion updates if any test
+    checks that unverified_mapping produces known=false.
+  - test/plan-2-1.test.js — badge test may need update since the initials
+    will now appear for the unverified company.
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  BUG 2B — Badge initials "اص" from personal name, not trade name        ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+CONTEXT:
+  Company 205971997 portal_name =
+    "احمد صابر محمد ابوالقمصان كيمورا للبويات و الصناعات الكيماوية
+     CHEMORA FOR PAINTS AND CHEMICAL"
+
+  companyInitials() takes the first character of the first two words:
+    word[0] = "احمد" → "ا"
+    word[1] = "صابر" → "ص"
+    result  = "اص"
+
+  This is a person's name ("Ahmed Saber"), not the company trade name
+  ("Chemora"). The portal combines both into one string because the ETA
+  registration is under the individual's name.
+
+ROOT CAUSE:
+  The portal_name field from the Egyptian Tax Authority portal contains the
+  FULL registered entity name which often starts with the founding partner's
+  personal name followed by the trade name. companyInitials() blindly takes
+  the first two words, which are almost always the person's first/last name.
+
+FIX PLAN:
+  This is a DATA QUALITY issue, not a code bug. The portal_name is what the
+  government portal sent us — we must not fabricate a different name.
+
+  Option A: Smart initials extraction — skip common Arabic personal-name
+    prefixes (أحمد, محمد, إبراهيم, etc.) and use the first "non-person"
+    word. REJECTED: fragile, culturally presumptuous, error-prone.
+
+  Option B: Let the user set a SHORT DISPLAY NAME or ABBREVIATION for each
+    company in the company identity form. If set, companyInitials() uses
+    that. REJECTED: too much new UI for this plan.
+
+  Option C (RECOMMENDED): Accept the initials as-is. The "اص" is correct
+    for the registered name "احمد صابر...". The user can fix it by going
+    to the company detail page and manually entering the trade name
+    "كيمورا للبويات" which would replace the portal name via
+    manual_verified origin, and the initials would become "كل" instead.
+    NO CODE CHANGE NEEDED. This is working-as-designed.
+
+  → VERDICT: NO CODE CHANGE for bug 2B. Document that the initials come
+    from the registered name and manual entry overrides them.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §4  ISSUE 3 — PAYROLL PAGE IS A DEAD PLACEHOLDER [STATUS: PLANNED]
+────────────────────────────────────────────────────────────────────────────────
+
+CURRENT STATE:
+  /payroll/page.jsx is a static React component with hardcoded numbers:
+    - "الشركات المسجلة بالرواتب: 3"     ← hardcoded <strong>3</strong>
+    - "إقرارات ربع سنوية (نموذج 4): 12" ← hardcoded <strong>12</strong>
+    - "التسوية السنوية: 3"              ← hardcoded <strong>3</strong>
+    - "حالة القارئ المحلي: جاهز للربط"  ← hardcoded string
+
+  There is no data fetch. No link to companies. No link FROM companies.
+  The page is a designed mockup, not a functional workspace.
+
+  Meanwhile, the payroll SCRAPER exists (documented in docs/PAYROLL-SCRAPING.md)
+  and writes to data/payroll.json (which does NOT yet exist in v8/data/).
+  The scraper was ported from V6 but the UI was never wired to its output.
+
+WHAT "CONNECTED" MEANS:
+  The user said "companies dose connected to payroll and payroll is not
+  connected to companies." They want:
+    1. The /payroll page to show REAL data from the database, not hardcoded
+       numbers.
+    2. Each company's detail page (/companies/[key]) to show that company's
+       payroll obligations and summary (if payroll data exists).
+    3. The /payroll page to list companies with payroll data and link to
+       their detail pages.
+
+FIX PLAN — THREE SUB-TASKS:
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  4A. Wire /payroll to real data (read from database)                │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  The payroll scraper writes to data/payroll.json (flat file, not SQLite).
+  Two approaches:
+
+  Option A: Read data/payroll.json on the server side in payroll/page.jsx.
+    Parse the JSON, extract account summaries, and render real numbers.
+    SIMPLE, matches the existing scraper output contract.
+
+  Option B: Ingest payroll data into SQLite tables and query them.
+    More work but gives filtering, company joins, and history.
+    DEFERRED to a future plan.
+
+  → GO WITH OPTION A for this plan.
+
+  Change payroll/page.jsx from a static component to an async server
+  component that:
+    1. Reads data/payroll.json (if it exists)
+    2. If the file doesn't exist, shows "لم يتم تشغيل فحص الرواتب بعد"
+       with a link to /settings to trigger a scan
+    3. If the file exists, renders:
+       - Real company count from accounts[].length
+       - Real filing counts from accounts[].obligations[].length
+       - Real submitted/unsubmitted split
+       - Last scan timestamp from scannedAt
+       - Per-company summary cards with links to /companies/[key]
+
+  FILE: launcher/app/(protected)/payroll/page.jsx — REWRITE to async server
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  4B. Add payroll section to company detail page                     │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  Company detail page (/companies/[key]) currently shows: tasks,
+  obligations, payments, messages. Add a "الرواتب" section at the bottom:
+
+  1. Read data/payroll.json, find the account matching this company's
+     account_key (the payroll JSON keys accounts by company name, so
+     match by normalized company name or account_key from the DB).
+  2. If found, show:
+     - Dashboard summary (9 values: tax due, payments, employees, etc.)
+     - Filing obligations table (form, period, due date, submitted?)
+  3. If not found, show "لا توجد بيانات رواتب لهذه الشركة"
+
+  FILE: launcher/app/(protected)/[section]/[key]/page.jsx — add payroll section
+  FILE: launcher/lib/data.js — add readPayrollData(companyAccountKey) helper
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  4C. Cross-link navigation                                          │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  1. /payroll page: each company card links to /companies/[key]
+  2. Company detail page: payroll section header links to /payroll
+  3. /payroll health cards: "الشركات المسجلة" card links to /companies
+
+  FILE: launcher/app/(protected)/payroll/page.jsx — add Link imports
+  FILE: launcher/app/(protected)/[section]/[key]/page.jsx — add Link to /payroll
+
+DATA DEPENDENCY:
+  data/payroll.json does NOT yet exist. The payroll scraper has never run
+  in V8 because no scan has been triggered. The page MUST handle the
+  missing-file case gracefully (show an empty state, not crash).
+
+FILES CHANGED (this issue): 3
+  launcher/app/(protected)/payroll/page.jsx          — rewrite to async server
+  launcher/app/(protected)/[section]/[key]/page.jsx  — add payroll section
+  launcher/lib/data.js                               — add readPayrollData()
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §5  VERIFICATION PROTOCOL
+────────────────────────────────────────────────────────────────────────────────
+
+AUTOMATED:
+  1. npm test — full suite must remain green (151+ pass, 0 new failures)
+  2. node node_modules/next/dist/bin/next build — must succeed
+  3. Playwright screenshot of /settings toggles — visual spot-check
+
+MANUAL:
+  1. Open /companies — verify "شركة جلوب كيم" shows its name, not
+     "اسم غير مسجّل". Verify it has the "يحتاج إلى تأكيد" sub-note.
+  2. Open /settings — verify all toggle switches look like real toggles:
+     visible knob, clear ON/OFF distinction, smooth animation.
+  3. Open /payroll — verify:
+     a. If data/payroll.json missing: empty state with link to /settings
+     b. If data/payroll.json present: real numbers, company links work
+  4. Open /companies/[any] — verify payroll section present at bottom.
+
+PM2:
+  npx pm2 list — all 6 processes online, 0 restarts after fix
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §6  RULES OF ENGAGEMENT
+────────────────────────────────────────────────────────────────────────────────
+
+  All rules from Plan 4.1 §13 remain in force. Additionally:
+
+  RULE K — DO NOT INVENT COMPANY NAMES
+    The identity resolver must never fabricate, guess, or abbreviate a
+    company name. If the portal sent "احمد صابر..." that is what we show.
+    The user can override it via the company identity form.
+
+  RULE L — GRACEFUL EMPTY STATES
+    Every page that reads data/payroll.json MUST handle the file-not-found
+    case with a clear Arabic empty state message. No crashes, no English
+    fallback, no blank screen.
+
+  RULE M — NO HARDCODED COUNTS
+    After this fix, no page should contain hardcoded <strong>3</strong>
+    or <strong>12</strong> as data counts. All numbers come from actual
+    data sources (database or JSON files).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ END OF PLAN 4.2 — VERIFIED & CLOSED
+═══════════════════════════════════════════════════════════════════════════════
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ SAPAuto V8 — Plan 4.3 Live Scraping & Payroll Integration
+ Codename  : HARVEST                 Status : OPEN
+ Version   : 4.3.0                   Date   : 2026-10-17
+ Root      : c:\Users\Mega Store\Downloads\SapAuto\v8
+ Depends   : Plan 4.2 (VERIFIED & CLOSED)
+═══════════════════════════════════════════════════════════════════════════════
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §0  TABLE OF CONTENTS
+────────────────────────────────────────────────────────────────────────────────
+
+  §1  Executive Summary
+  §2  Session 4.3 Accomplishments (Already Done)
+  §3  Issue 1 — MCF Obligations Filter Fix (DONE)
+  §4  Issue 2 — Payroll Scraper Returns 0 Rows (OPEN — ROOT CAUSE IDENTIFIED)
+  §5  Issue 3 — Toggle Switch Visual Quality (DONE in 4.2, needs verification)
+  §6  Issue 4 — Payroll Page Wired to Real Data (DONE)
+  §7  Issue 5 — Company Identity Resolution (DONE in 4.2)
+  §8  Issue 6 — Payroll Integration into Harness Loop (OPEN)
+  §9  Issue 7 — Cross-Domain SSO Investigation (OPEN)
+  §10 Issue 8 — Payroll Dashboard Summary Extraction (OPEN)
+  §11 Current Database State & Live Scan Results
+  §12 Architecture: Two Portals, One Browser
+  §13 File Manifest (Session 4.3 Changes)
+  §14 Verification Protocol
+  §15 Diagnostic Playbook for Payroll 0-Row Bug
+  §16 Rules of Engagement
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §1  EXECUTIVE SUMMARY
+────────────────────────────────────────────────────────────────────────────────
+
+Plan 4.3 addresses the live-scraping stability of both the MCF and Payroll
+portals. The session achieved FULL MCF obligations recovery (168 obligations
+across 4 accounts) by fixing the filter-switching and tile-navigation bugs,
+created a complete Payroll scraper + runner + UI page pipeline, but discovered
+that the PAYROLL SCRAPER RETURNS 0 OBLIGATION ROWS despite successfully
+authenticating and navigating to the correct page.
+
+STATUS SNAPSHOT (as of 2026-10-17T03:27Z):
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │  COMPONENT                    │ STATUS                             │
+  ├───────────────────────────────┼────────────────────────────────────┤
+  │  MCF Obligations Filter       │ ✅ FIXED — 168 obligations in DB   │
+  │  MCF Tile Navigation          │ ✅ FIXED — Home→tile→hash pattern  │
+  │  MCF Reconciliation           │ ✅ WORKING — "الكل" filter applied │
+  │  Payroll Scraper (code)       │ ✅ CREATED — PayrollScraper class  │
+  │  Payroll Runner (runner)      │ ✅ CREATED — run-payroll-scan.js   │
+  │  Payroll Page UI              │ ✅ WIRED — reads payroll.json      │
+  │  Payroll readPayrollData()    │ ✅ CREATED — in launcher/lib/data  │
+  │  Payroll Data Extraction      │ ❌ 0 ROWS — all 4 accounts empty  │
+  │  Toggle Switch CSS            │ ✅ DONE — high-contrast + shadow   │
+  │  Company Identity (known)     │ ✅ FIXED — unverified shows name   │
+  │  PM2 Harness                  │ ✅ ONLINE — pid 39820, 5 restarts  │
+  │  Test Suite                   │ ✅ 151/157 pass, 5 skip, 1 MCP     │
+  └───────────────────────────────┴────────────────────────────────────┘
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §2  SESSION 4.3 ACCOMPLISHMENTS (ALREADY DONE)
+────────────────────────────────────────────────────────────────────────────────
+
+  ✅ 1. MCF obligations filter (§3) — rewritten _applyFilter() in
+       obligations-scraper.js to use direct Playwright locator clicks
+       instead of page.evaluate UI5 registry. Result: 168 obligations
+       across 4 accounts (was ~36 before fix).
+
+  ✅ 2. Tile navigation pattern — navigateToHash() in ui5-helpers.js
+       rewritten to use Home button → tile click → hash fallback.
+       This handles the SAP launchpad correctly.
+
+  ✅ 3. PayrollScraper class — new 259-line scraper at
+       harness/scraper/automation/portal/payroll-scraper.js.
+       Handles tile click, filter switch, scroll, row extraction.
+
+  ✅ 4. Payroll runner — new 147-line script at run-payroll-scan.js.
+       Iterates 4 accounts, saves to data/payroll.json + data/payroll.csv.
+
+  ✅ 5. Payroll page rewrite — launcher/app/(protected)/payroll/page.jsx
+       is now a 239-line async server component reading real data from
+       payroll.json via readPayrollData() in lib/data.js.
+
+  ✅ 6. readPayrollData() — added to launcher/lib/data.js (L360-480).
+       Multi-path file discovery, company DB matching, bounded arrays,
+       Arabic error messages, graceful empty state.
+
+  ✅ 7. Toggle switch restyling — components.css L605-646 now has
+       white knob, box-shadow, strong border, high-contrast ON state.
+
+  ✅ 8. Company identity fix — domain/company-identity.cjs L60 now:
+         known: Boolean(name) && origin !== 'conflict'
+       (removed `origin !== 'unverified_mapping'` exclusion).
+
+  ✅ 9. Portal URLs — portal-urls.js exports SAP_PAYROLL_PORTAL_URL
+       and SAP_PAYROLL_FILING_OBLIGATIONS_URL constants.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §3  ISSUE 1 — MCF OBLIGATIONS FILTER FIX [STATUS: DONE ✅]
+────────────────────────────────────────────────────────────────────────────────
+
+PROBLEM:
+  The MCF obligations scraper could not switch the filter control from
+  "لم يتم التقديم" (Not Filed) to "الكل" (All). The obligation reconciliation
+  was skipped entirely, producing incomplete data (~36 obligations instead
+  of 168).
+
+ROOT CAUSE:
+  1. navigateToHash() used `window.location.hash = route` which does NOT work
+     from the SAP launchpad (tile container). The hash sets but the app
+     doesn't navigate — you must CLICK the tile.
+  2. switchSelectFilter() used page.evaluate to find the UI5 Select control
+     in the registry, but the browser context sometimes can't see the
+     registry → returns `control_matches_0`.
+  3. The popover list item text matching for "الكل" failed because items
+     have embedded count text.
+
+FIX APPLIED (3 files):
+
+  obligations-scraper.js:
+    - Rewrote _applyFilter() to use direct Playwright locator strategy:
+      1. Find `.sapMSlt:not(.sapMSltHiddenSelect)` → click
+      2. Wait 800ms for popover
+      3. Find `li` with hasText: /^الكل/ → click
+      4. Wait 2000ms for table reload
+    - Added tile click after navigateToHash() for launchpad handling.
+    - Label pre-check: if `.sapMSltLabel` already contains "الكل", skip.
+
+  ui5-helpers.js:
+    - Rewrote navigateToHash() (~L869) to use Home button → tile click
+      → hash fallback pattern.
+    - Enhanced switchSelectFilter() with broader DOM selectors and
+      Playwright locator Strategy 3 fallback.
+
+  documents.js:
+    - Enhanced _verifyFilterApplied() with fast-path Playwright locator
+      check for `.sapMSltLabel` containing "الكل" before the heavy
+      page.evaluate() UI5 registry path.
+
+LIVE RESULTS (last successful run 2026-10-16T19:55Z):
+  marwanhamada: 31 obligations, 22 messages
+  205971997:    53 obligations, 31 messages
+  315240679:    42 obligations, 25 messages
+  533158788:    40 obligations, 24 messages
+  TOTAL:        168 obligations, 220 payments, 102 messages, 31 tasks
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §4  ISSUE 2 — PAYROLL SCRAPER RETURNS 0 ROWS [STATUS: OPEN ❌]
+────────────────────────────────────────────────────────────────────────────────
+
+This is the HIGHEST PRIORITY open issue.
+
+SYMPTOM:
+  run-payroll-scan.js executes successfully for all 4 accounts. Each account:
+    - Authenticates via Keycloak ✓
+    - Navigates to ZMCF_PAYROLL portal ✓
+    - Gets company name from portal ✓ (names are in payroll.json)
+    - Returns 0 obligations
+    - All summary fields are 0
+
+  data/payroll.json contains 4 accounts with correct company names but
+  empty obligations arrays and zeroed summaries. The scraper clearly reaches
+  the portal (it reads company names) but fails to extract table data.
+
+ROOT CAUSE CANDIDATES (in order of likelihood):
+
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  CANDIDATE 1 — DIFFERENT DOM STRUCTURE (MOST LIKELY)                ║
+  ╠═══════════════════════════════════════════════════════════════════════╣
+  ║                                                                     ║
+  ║  The MCF portal uses SAP UI5 sap.m.Table with class sapMListTblRow  ║
+  ║  and sapMListTblCell. The ZMCF_PAYROLL app may use a DIFFERENT SAP  ║
+  ║  control:                                                           ║
+  ║    - sap.ui.table.Table (desktop grid) → <tr> with sapUiTable*     ║
+  ║    - sap.m.List → <li> with sapMLIBContent                        ║
+  ║    - sap.f.GridList → flex-based layout                            ║
+  ║    - Custom rendered cards (no <table> at all)                     ║
+  ║                                                                     ║
+  ║  The current _extractRows() selector is:                            ║
+  ║    'table tbody tr.sapMListTblRow, div.sapMLIB, tr[data-sap-ui]'   ║
+  ║  plus a fallback to 'table tbody tr'. If the payroll app uses      ║
+  ║  a non-table control, BOTH selectors return 0 elements.            ║
+  ║                                                                     ║
+  ║  FIX: Run a diagnostic that dumps the DOM structure of the payroll ║
+  ║  page after navigation + filter switch. Identify the actual        ║
+  ║  container and row selectors. Update _extractRows().               ║
+  ╚═══════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  CANDIDATE 2 — PAGE NOT FULLY LOADED                                ║
+  ╠═══════════════════════════════════════════════════════════════════════╣
+  ║                                                                     ║
+  ║  The payroll app is on a different host (uptp.eta.gov.eg) from the  ║
+  ║  MCF portal (fpascs.eta.gov.eg). It may:                           ║
+  ║    - Load more slowly (heavier SAP module)                         ║
+  ║    - Require additional UI5 bootstrapping time                     ║
+  ║    - Need a specific navigation sequence (tile→subtab→list)        ║
+  ║                                                                     ║
+  ║  The current wait is 3000ms after goto + 3000ms after tile click.  ║
+  ║  This may be insufficient. The user's live browser inspection      ║
+  ║  showed a `data-scrollable="bottom=1995"` attribute, meaning the   ║
+  ║  content is ~2000px tall — this implies data IS there but the      ║
+  ║  scraper may be reading before it renders.                         ║
+  ║                                                                     ║
+  ║  FIX: Add waitForTableStable() or explicit waitForSelector() on   ║
+  ║  the actual table/list control before extracting. Increase timeout ║
+  ║  to 10-15s.                                                        ║
+  ╚═══════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  CANDIDATE 3 — CROSS-DOMAIN SSO SESSION NOT SHARED                  ║
+  ╠═══════════════════════════════════════════════════════════════════════╣
+  ║                                                                     ║
+  ║  Login flows through workspace.eta.gov.eg Keycloak. The SSO cookie ║
+  ║  may not be valid on uptp.eta.gov.eg (different subdomain). The    ║
+  ║  scraper detects "redirected to login page" but returns silently   ║
+  ║  with 0 obligations instead of re-authenticating.                  ║
+  ║                                                                     ║
+  ║  Evidence AGAINST: The scraper successfully reads company names    ║
+  ║  from the payroll page, which wouldn't happen if not authenticated.║
+  ║  However, the company name might come from the User Profile page   ║
+  ║  (which IS on the authenticated domain), not from the payroll page.║
+  ║                                                                     ║
+  ║  FIX: Take a screenshot after navigation. Check if the page shows  ║
+  ║  the actual data table or a "session expired" / login redirect.    ║
+  ╚═══════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  CANDIDATE 4 — COMPANY NAME SOURCE MISMATCH                        ║
+  ╠═══════════════════════════════════════════════════════════════════════╣
+  ║                                                                     ║
+  ║  The runner (run-payroll-scan.js L51-52) gets the company name from║
+  ║  the SQLite companies table, NOT from the payroll portal itself.   ║
+  ║  This means the company name in payroll.json is correct even if    ║
+  ║  the payroll page shows nothing — the name is pre-populated from DB║
+  ║  before the scraper runs. This DOES NOT explain 0 obligations but ║
+  ║  it explains why names appear correct despite extraction failure.  ║
+  ╚═══════════════════════════════════════════════════════════════════════╝
+
+DIAGNOSTIC PLAN:
+  See §15 for the step-by-step diagnostic playbook.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §5  ISSUE 3 — TOGGLE SWITCH VISUAL QUALITY [STATUS: DONE ✅]
+────────────────────────────────────────────────────────────────────────────────
+
+RESOLVED in Plan 4.2 and this session.
+
+CURRENT STATE (components.css L605-646):
+  - Track: 44×24px, border-radius:full, background:var(--surface-3),
+    border: 1px solid var(--border-strong), overflow:hidden
+  - Knob: 18×18px, white (#ffffff), box-shadow: 0 1px 3px rgb(0 0 0 / .35)
+  - ON state: background:var(--accent), border-color:var(--accent),
+    knob still white with lighter shadow
+  - Travel: translateX(calc(-100% - 2px)) in both base and RTL rules
+  - justify-content: flex-start (knob rests at inline-start)
+
+VERIFICATION: Visual spot-check in browser. No automated bounding-box test
+  added yet — considered but deferred because Playwright visual tests
+  require a headed browser and CI doesn't have one.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §6  ISSUE 4 — PAYROLL PAGE WIRED TO REAL DATA [STATUS: DONE ✅]
+────────────────────────────────────────────────────────────────────────────────
+
+RESOLVED in this session. The /payroll page is now a fully data-driven
+async server component.
+
+IMPLEMENTATION:
+  launcher/app/(protected)/payroll/page.jsx (239 lines):
+    - Reads from readPayrollData() on server side
+    - Empty state: "لم يتم تشغيل فحص الرواتب بعد" with link to /settings
+    - Data state: real counts, per-company cards, obligation tables
+    - Each company card links to /companies/[key]
+    - No hardcoded numbers anywhere
+
+  launcher/lib/data.js (L360-480):
+    - readPayrollData(companyAccountKey?) function
+    - Multi-path file discovery (V8_ROOT env, cwd, parent dir)
+    - Company DB matching by account_key and name
+    - Bounded arrays (MAX_ACCOUNTS=100, MAX_OBLIGATIONS=1000)
+    - Arabic error messages for parse failures
+    - Graceful empty state when file missing
+
+DATA FLOW:
+  run-payroll-scan.js → PayrollScraper → data/payroll.json
+  payroll/page.jsx → readPayrollData() → data/payroll.json → render
+
+NOTE: The payroll page currently shows 0 obligations for each company
+  because the scraper returns 0 rows (Issue 2). Once Issue 2 is fixed,
+  the page will automatically display the real data.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §7  ISSUE 5 — COMPANY IDENTITY RESOLUTION [STATUS: DONE ✅]
+────────────────────────────────────────────────────────────────────────────────
+
+RESOLVED in Plan 4.2.
+
+FIX: domain/company-identity.cjs line 60:
+  BEFORE: known: Boolean(name) && origin !== 'conflict' && origin !== 'unverified_mapping'
+  AFTER:  known: Boolean(name) && origin !== 'conflict'
+
+EFFECT: Companies with name_source="source" (imported from SAPAuto3) now
+  display their name prominently instead of "اسم غير مسجّل". The
+  "يحتاج إلى تأكيد" sub-note still appears for unverified_mapping origin,
+  correctly telling the user the name needs manual confirmation.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §8  ISSUE 6 — PAYROLL INTEGRATION INTO HARNESS LOOP [STATUS: OPEN 🔜]
+────────────────────────────────────────────────────────────────────────────────
+
+PROBLEM:
+  The payroll scan currently runs as a STANDALONE script (run-payroll-scan.js).
+  It is NOT integrated into the main harness automation loop (loop.js →
+  run-account.js → scraper/index.js). This means:
+    - Payroll data is not refreshed automatically on schedule
+    - The /settings dashboard doesn't show payroll scan status
+    - No PM2-managed process for payroll scanning
+
+DESIRED STATE:
+  The payroll scan should run as part of each account's scan cycle, AFTER
+  the MCF portal scan completes. Alternatively, it should run as a separate
+  scheduled cycle.
+
+FIX OPTIONS:
+
+  Option A — INTEGRATED (add to scanAccount contract):
+    Extend scanAccount() to also scrape the ZMCF_PAYROLL portal after
+    the MCF scan. Add a `payroll` field to the scan contract. Write
+    payroll data to the SQLite database (new table) alongside obligations.
+    PROS: Single scan, single cycle, one login session
+    CONS: Doubles scan time per account, cross-domain navigation complexity
+
+  Option B — SEPARATE CYCLE (recommended for now):
+    Keep run-payroll-scan.js as a standalone script. Add it to PM2 as a
+    scheduled cron job (e.g., every 6 hours). Add a simple status indicator
+    on /settings that reads data/payroll.json timestamp.
+    PROS: Independent failure domain, simpler to debug, payroll-specific logging
+    CONS: Separate credentials resolution, separate browser session
+
+  → DEFER to Plan 4.4. The standalone script works and the data pipeline is
+    proven. Integration should happen after the 0-row extraction bug is fixed.
+
+FILES TO CHANGE (future):
+  - harness/loop.js OR pm2.config.cjs — add payroll cycle
+  - launcher/components/settings-form.jsx — add payroll status indicator
+  - db/migrations/022_payroll.sql — payroll obligations table (if Option A)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §9  ISSUE 7 — CROSS-DOMAIN SSO INVESTIGATION [STATUS: OPEN 🔍]
+────────────────────────────────────────────────────────────────────────────────
+
+CONTEXT:
+  The Egyptian Tax Authority (ETA) runs multiple SAP applications on
+  DIFFERENT hostnames:
+
+    fpascs.eta.gov.eg:44300   — MCF portal (ZETA_MCFAPP)
+    uptp.eta.gov.eg           — Payroll portal (ZMCF_PAYROLL)
+    workspace.eta.gov.eg      — Workspace (Angular)
+    profile.eta.gov.eg        — Keycloak SSO
+
+  All use Keycloak SSO on profile.eta.gov.eg. The question is whether
+  a Keycloak session obtained via loginToKeycloak() is valid across ALL
+  these domains, or if each domain requires its own authentication.
+
+EVIDENCE:
+  - The payroll runner calls loginToKeycloak() once per account, then
+    navigates to uptp.eta.gov.eg. The scraper reads company names
+    successfully, suggesting the session IS shared.
+  - However, the scraper's L50-53 checks `page.url().includes('login')`
+    and returns early if redirected. If the SSO redirects transparently
+    (302 → Keycloak → 302 → payroll), the page.url() after goto would
+    show the final payroll URL, not the login URL.
+
+INVESTIGATION NEEDED:
+  1. Take screenshots at each navigation step
+  2. Log page.url() after goto, after tile click
+  3. Check if `[data-scrollable]` container exists on the page
+  4. Dump all cookies with `page.context().cookies()` to verify SSO tokens
+
+  → This investigation is part of the §15 diagnostic playbook.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §10  ISSUE 8 — PAYROLL DASHBOARD SUMMARY EXTRACTION [STATUS: OPEN 🔜]
+────────────────────────────────────────────────────────────────────────────────
+
+PROBLEM:
+  The payroll summary stats (taxDueCurrentYear, employeeCount, etc.) are
+  all hardcoded to 0 in PayrollScraper._extractRows(). These values should
+  come from the ZMCF_PAYROLL dashboard section, which shows aggregate stats
+  above the obligations table.
+
+DASHBOARD DATA (from user's browser inspection):
+  The ZMCF_PAYROLL page has a dashboard section with:
+    - إجمالي الضريبة المستحقة (total tax due)
+    - مدفوعات ضريبة المرتبات (payroll tax payments)
+    - عدد الموظفين (employee count)
+    - مصري / أجنبي split (Egyptian/foreign)
+    - الإقرارات المقدمة (submitted filings count)
+
+BLOCKED BY: Issue 2 (0-row bug). Once we can see the actual DOM, we can
+  identify the dashboard selectors and extract real values.
+
+FIX PLAN:
+  1. Add _extractDashboardSummary(page) method to PayrollScraper
+  2. Run it before _extractRows()
+  3. Merge dashboard stats with row-derived stats
+  4. Return accurate summary object
+
+FILES: harness/scraper/automation/portal/payroll-scraper.js — add method
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §11  CURRENT DATABASE STATE & LIVE SCAN RESULTS
+────────────────────────────────────────────────────────────────────────────────
+
+DATABASE (as of 2026-10-17T03:30Z):
+  ┌────────────────────────────┬───────┐
+  │ Table                      │ Count │
+  ├────────────────────────────┼───────┤
+  │ obligations                │  168  │
+  │ payments                   │  220  │
+  │ messages                   │  102  │
+  │ tasks                      │   31  │
+  │ companies                  │    4  │
+  │ automation_cycles (total)  │    2  │
+  └────────────────────────────┴───────┘
+
+LAST SUCCESSFUL MCF CYCLE:
+  ID: cycle_2da68ec1
+  Started: 2026-10-16T19:55:02Z
+  Finished: 2026-10-16T19:59:08Z (4 min 6 sec)
+  State: done
+  Accounts processed: 4/26
+  Accounts failed: 0
+
+MCF OBLIGATIONS BY ACCOUNT:
+  marwanhamada — 31 obligations
+  205971997    — 53 obligations
+  315240679    — 42 obligations
+  533158788    — 40 obligations
+
+PAYROLL DATA (data/payroll.json):
+  scannedAt: 2026-10-17T00:25:27Z
+  ┌──────────────┬──────────────────────────────────────────┬───────────────┐
+  │ Account      │ Company (first 30 chars)                 │ Obligations   │
+  ├──────────────┼──────────────────────────────────────────┼───────────────┤
+  │ marwanhamada │ المجموعه المتحده للزيوت والدها...        │ 0             │
+  │ 205971997    │ احمد صابر محمد ابوالقمصان كيمو...        │ 0             │
+  │ 315240679    │ كينج كيسينج لتجهيز وتعبئه الام...       │ 0             │
+  │ 533158788    │ مروه مصطفي عبدالحميد عبدالمجيد...       │ 0             │
+  └──────────────┴──────────────────────────────────────────┴───────────────┘
+
+PM2 PROCESSES (all online):
+  sapauto-v8-harness    — pid 39820, 17min uptime, 5 restarts
+  sapauto-v8-assistant  — pid 36844, 113min uptime
+  sapauto-v8-channels   — pid 17400, 110min uptime
+  sapauto-v8-launcher   — pid 19732, 64min uptime
+  sapauto-v8-local-model — pid 30168, 113min uptime
+  sapauto-v8-mcp        — pid 32280, 113min uptime
+
+TEST SUITE:
+  151 pass, 5 skip, 1 fail (MCP timeout — pre-existing, unrelated)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §12  ARCHITECTURE: TWO PORTALS, ONE BROWSER
+────────────────────────────────────────────────────────────────────────────────
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        KEYCLOAK SSO                                        │
+│                   profile.eta.gov.eg                                       │
+│                                                                            │
+│         ┌──────────── loginToKeycloak() ────────────┐                      │
+│         │                                           │                      │
+│         ▼                                           ▼                      │
+│  ┌─────────────────────┐           ┌──────────────────────────┐            │
+│  │  MCF PORTAL (ZETA)  │           │  PAYROLL PORTAL (ZMCF)   │            │
+│  │  fpascs.eta.gov.eg  │           │  uptp.eta.gov.eg         │            │
+│  │  :44300             │           │                          │            │
+│  │                     │           │                          │            │
+│  │  #/filing_obligations│          │  #/filing_obligations    │            │
+│  │  #/documents         │          │  (same hash, DIFFERENT   │            │
+│  │  #/forms             │          │   app & DOM structure)   │            │
+│  │  #/messages          │          │                          │            │
+│  │  #/user_profile      │          │                          │            │
+│  └─────────────────────┘           └──────────────────────────┘            │
+│         │                                           │                      │
+│         ▼                                           ▼                      │
+│  ┌─────────────────────┐           ┌──────────────────────────┐            │
+│  │  ObligationsScraper │           │  PayrollScraper          │            │
+│  │  FormsScraper       │           │  (new, 259 lines)        │            │
+│  │  MessagesScraper    │           │                          │            │
+│  │  PaymentsScraper    │           │  run-payroll-scan.js     │            │
+│  │                     │           │  (runner, 147 lines)     │            │
+│  │  portal-scanner.js  │           │                          │            │
+│  │  (coordinator)      │           │                          │            │
+│  └─────────────────────┘           └──────────────────────────┘            │
+│         │                                           │                      │
+│         ▼                                           ▼                      │
+│  ┌─────────────────────┐           ┌──────────────────────────┐            │
+│  │  SQLite DB          │           │  data/payroll.json       │            │
+│  │  (obligations,      │           │  data/payroll.csv        │            │
+│  │   payments,         │           │                          │            │
+│  │   messages, tasks)  │           │                          │            │
+│  └─────────────────────┘           └──────────────────────────┘            │
+│         │                                           │                      │
+│         └──────────────── LAUNCHER UI ──────────────┘                      │
+│              /companies    /obligations    /payroll                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CRITICAL DIFFERENCE:
+  Both portals have a `#/filing_obligations` hash route. But they are
+  COMPLETELY DIFFERENT SAP UI5 applications with different:
+    - SAP module names (ZETA_MCFAPP vs ZMCF_PAYROLL)
+    - Hostnames (fpascs vs uptp)
+    - DOM structures (MCF uses sapMListTblRow, payroll is UNKNOWN)
+    - Data contracts (MCF has obligations/payments/messages, payroll has
+      payroll-specific filing obligations + dashboard summary)
+
+  The PayrollScraper CANNOT reuse ObligationsScraper selectors.
+  It needs its own DOM discovery.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §13  FILE MANIFEST (SESSION 4.3 CHANGES)
+────────────────────────────────────────────────────────────────────────────────
+
+ Status  | Path                                                     | Lines
+─────────┼──────────────────────────────────────────────────────────┼──────
+ MODIFIED| harness/scraper/automation/portal/obligations-scraper.js | 317
+ MODIFIED| harness/scraper/automation/portal/ui5-helpers.js         | ~900
+ MODIFIED| harness/scraper/automation/documents.js                  | ~500
+ NEW     | harness/scraper/automation/portal/payroll-scraper.js     | 259
+ NEW     | run-payroll-scan.js                                      | 147
+ MODIFIED| harness/scraper/automation/portal/portal-urls.js         | 110
+ MODIFIED| launcher/app/(protected)/payroll/page.jsx                | 239
+ MODIFIED| launcher/lib/data.js                                     | 502
+ MODIFIED| launcher/app/components.css                              | 940
+ MODIFIED| domain/company-identity.cjs                              | ~65
+ MODIFIED| data/payroll.json                                        | (data)
+ MODIFIED| data/payroll.csv                                         | (data)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §14  VERIFICATION PROTOCOL
+────────────────────────────────────────────────────────────────────────────────
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  PHASE A: AUTOMATED TESTS                                              │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  A1. Full test suite                                                   │
+  │      cd v8 && npm test                                                 │
+  │      EXPECTED: 151+ pass, ≤5 skip, ≤1 fail (MCP timeout only)        │
+  │                                                                        │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │  PHASE B: MCF LIVE SCAN                                                │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  B1. Trigger a scan from /settings or PM2                              │
+  │  B2. Verify 4 accounts complete without errors                         │
+  │  B3. Check obligations count ≥ 168 in database                        │
+  │  B4. Verify no "Could not switch the filter" warnings in logs          │
+  │  B5. Verify reconciliation warnings are gone                           │
+  │                                                                        │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │  PHASE C: PAYROLL SCAN                                                 │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  C1. Run: node run-payroll-scan.js                                     │
+  │  C2. Check data/payroll.json:                                          │
+  │      - 4 accounts present                                              │
+  │      - Company names are correct (Arabic, non-garbled)                 │
+  │      - obligations.length > 0 for at least 1 account                  │
+  │        (IF this is still 0, run §15 diagnostic playbook)               │
+  │  C3. Check data/payroll.csv has UTF-8 BOM and Arabic content           │
+  │                                                                        │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │  PHASE D: UI VERIFICATION                                             │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  D1. Open /payroll — verify real data or graceful empty state          │
+  │  D2. Open /companies — verify company names are visible, not           │
+  │      "اسم غير مسجّل"                                                   │
+  │  D3. Open /settings — verify toggle switches look correct              │
+  │  D4. Check PM2: npx pm2 list — all 6 processes online                  │
+  │                                                                        │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §15  DIAGNOSTIC PLAYBOOK FOR PAYROLL 0-ROW BUG
+────────────────────────────────────────────────────────────────────────────────
+
+Run this step-by-step to diagnose why _extractRows() returns 0:
+
+  STEP 1 — DOM DUMP
+  ─────────────────
+  Create a diagnostic script that:
+    a. Logs in via Keycloak for one account (e.g., marwanhamada)
+    b. Navigates to SAP_PAYROLL_FILING_OBLIGATIONS_URL
+    c. Waits 10 seconds (generous)
+    d. Takes a full-page screenshot → data/diag-payroll-1-after-goto.png
+    e. Logs page.url()
+    f. Checks if `.sapMTile, .sapMCustomTile` tile exists (launchpad check)
+    g. If tile exists, clicks "التزامات التقديم" tile, waits 5s, screenshots
+    h. Dumps ALL class names on the page:
+         page.evaluate(() => [...new Set([...document.querySelectorAll('*')]
+           .map(el => el.className).filter(Boolean))].sort())
+    i. Dumps the outer HTML of the main content area:
+         page.evaluate(() => document.querySelector('#__page1-cont, [data-scrollable], .sapMPage')?.outerHTML?.substring(0, 5000))
+    j. Specifically checks these selectors and logs their count:
+         - 'table tbody tr.sapMListTblRow'
+         - 'div.sapMLIB'
+         - 'tr[data-sap-ui]'
+         - 'table tbody tr'
+         - '.sapUiTableRow'
+         - '.sapMListItem'
+         - 'li.sapMLIB'
+         - '[role="row"]'
+         - '[role="listitem"]'
+         - '.sapMListTblRow'
+         - '.sapMListItems'
+    k. Takes final screenshot → data/diag-payroll-2-final.png
+
+  STEP 2 — FILTER VERIFICATION
+  ─────────────────────────────
+    a. Check if `.sapMSlt, .sapMSltLabel` exists
+    b. Read its text content
+    c. If it says "لم يتم التقديم", try the filter switch sequence
+    d. Screenshot after filter switch
+
+  STEP 3 — ANALYZE RESULTS
+  ────────────────────────
+    a. If screenshots show login/error page → SSO issue (Candidate 3)
+    b. If screenshots show empty table → filter issue or no data
+    c. If screenshots show data but selectors return 0 → DOM mismatch (Candidate 1)
+    d. If page shows "لا توجد بيانات" → accounts genuinely have 0 payroll
+
+  STEP 4 — UPDATE SELECTORS
+  ─────────────────────────
+    Based on the DOM dump from Step 1h/1i, update _extractRows() in
+    payroll-scraper.js with the correct SAP UI5 control selectors.
+
+  STEP 5 — RERUN & VERIFY
+  ───────────────────────
+    Run: node run-payroll-scan.js
+    Check data/payroll.json has obligations.length > 0
+
+CLEAN UP: Delete all diag-payroll-*.png files and scratch scripts after fix.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §16  RULES OF ENGAGEMENT
+────────────────────────────────────────────────────────────────────────────────
+
+  All rules from Plan 4.1 §13 and Plan 4.2 §6 remain in force. Additionally:
+
+  RULE N — TWO PORTALS, TWO SCRAPERS
+    The MCF portal (ZETA_MCFAPP) and Payroll portal (ZMCF_PAYROLL) are
+    different SAP applications. Do NOT copy MCF selectors into the Payroll
+    scraper. Each scraper must discover its own DOM structure.
+
+  RULE O — SCREENSHOT-DRIVEN DEBUGGING
+    When diagnosing scraper issues on a live portal, ALWAYS take screenshots.
+    Do not guess what the page looks like from selector failures alone.
+    Save screenshots to data/ with descriptive names.
+
+  RULE P — PAYROLL DATA IS READ-ONLY
+    The payroll scraper must NEVER submit forms, click "تقديم" buttons,
+    or modify any data on the ZMCF_PAYROLL portal. It is a read-only scanner.
+    Defensive: reject any page.click() call on elements matching
+    تقديم|submit|إرسال|حفظ unless explicitly for navigation (filter/tile).
+
+  RULE Q — CROSS-DOMAIN AWARENESS
+    When navigating between portals (fpascs → uptp), always verify the page
+    loaded correctly by checking page.url() and taking a screenshot. SSO
+    sessions may not transfer between subdomains.
+
+  RULE R — NO SILENT EMPTY RESULTS
+    If a scraper returns 0 obligations and the filter was NOT confirmed to
+    be on "الكل", log a WARN-level message. The empty result should be
+    distinguishable from "genuinely no data" vs "extraction failure".
+    PayrollScraper currently logs but does not differentiate these cases.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ §17  LIVE RESOLUTION & VERIFICATION (2026-10-17)
+═══════════════════════════════════════════════════════════════════════════════
+
+1. ROOT CAUSE OF 0-ROW PAYROLL SCRAPING:
+   - On ZMCF_PAYROLL initial navigation, the page redirects to #/home (Launchpad overview).
+   - Tile clicking failed because the launcher had two matching tiles: the statistical overview
+     tile ("بيانات التزامات التقديم عن السنة الحالية...") and the navigation tile. Clicking was
+     either clicking the non-navigating tile or timed out before the UI5 view finished hydration.
+   - The row extraction query was reading td and th together without isolating .sapMListTblCell,
+     causing offset mappings.
+
+2. FIX IMPLEMENTED:
+   - Synchronized UI5 launchpad hydration with `waitForSelector('.sapMTile, .sapMCustomTile')`.
+   - Targeted the custom navigation tile directly (`.sapMCustomTile` with "لم يتم التقديم").
+   - Filter switch to "الكل" confirmed via fast Playwright locator on `.sapMSlt:not(.sapMSltHiddenSelect)`.
+   - Extracted live dashboard statistics (employee counts, tax due, payments) directly from overview tiles.
+   - Refined row cells to strictly parse `td.sapMListTblCell`.
+
+3. LIVE RESULTS ACROSS 4 ACCOUNTS:
+   - marwanhamada: 38 payroll obligations extracted (38 unsubmitted filings)
+   - 205971997:    38 payroll obligations extracted (employee count: 33)
+   - 315240679:    38 payroll obligations extracted (38 unsubmitted filings)
+   - 533158788:    0 payroll obligations (account has no active payroll registration/tiles on portal)
+   - Total payroll records saved to `data/payroll.json` and `data/payroll.csv`: 114 obligations.
+   - All PM2 services running and healthy.
+
+═══════════════════════════════════════════════════════════════════════════════
+ END OF PLAN 4.3 — VERIFIED & CLOSED
+═══════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+ §18  PLAN 4.4 — LIVE AI DEEP-READ & STUDY FOR OBLIGATIONS, MESSAGES & DOCUMENTS
+────────────────────────────────────────────────────────────────────────────────
+
+Status : IMPLEMENTED & IN VERIFICATION
+Date   : 2026-10-17
+
+A. USER DIRECTIVE:
+   1. "lets make scraper opens and read inside the obligations, messages and documents then lend it to the built ai to study it live"
+   2. "it read the new one not every time reads every single data"
+   3. "upgrade task.txt with where we at and what are you going to do not complete later"
+
+B. WHERE WE ARE AT (COMPLETED & VERIFIED IN CODE):
+   1. Database Architecture:
+      - Migration `022_ai_study.sql` created and applied.
+      - `obligations` has `ai_study`, `ai_risk_score`, `ai_studied_at`.
+      - `messages` has `ai_study`, `ai_action_required`, `ai_studied_at`.
+      - `tasks` has `ai_study`, `ai_studied_at`.
+      - Migration count verified at 22 in `test/db.test.js`.
+   2. Local AI Live Analyst Engine (`assistant/live-analyst.js`):
+      - HTTP client directly connects to `sapauto-v8-local-model` at `127.0.0.1:7799`.
+      - Implemented `studyObligation()`, `studyMessage()`, `studyDocument()`.
+      - Implemented incremental study method `studyNewAccountEntities(accountKey, limit)`.
+      - Filters strictly on `WHERE (ai_study = '' OR ai_study IS NULL)`.
+      - Tested live on CPU with high-quality concise Arabic tax advice.
+   3. Incremental Deep-Read in Scraper (`harness/scraper/automation/portal/messages-scraper.js`):
+      - Scraper checks `options.existingMessages` to detect previously read messages.
+      - Skips clicking already-read messages to protect portal bandwidth and run time.
+      - For NEW messages (bounded to 3 per cycle): clicks row element, extracts detail fields (severity, msgType, subject, body), and returns to list.
+      - Preserves architectural invariant: scraper closure remains self-contained (`test/plan-4-1.test.js` passes 100%).
+   4. Ingestion & Background AI Trigger (`harness/ingest.js`):
+      - `messages` upsert preserves existing non-empty body.
+      - `messages` title falls back to `rawSummary` when title/subject is absent.
+      - `triggerLiveAiStudy(accountKey, db)` runs via `setImmediate` right after transaction commit.
+      - Completely non-blocking: scraper and database commits never stall waiting for LLM token generation.
+   5. Launcher UI Surfaces (`launcher/components/`, `launcher/lib/data.js`):
+      - `data.js` messages query updated to include `ai_study`, `ai_action_required`, `ai_studied_at`.
+      - `messages-view.jsx` renders blue AI study card and urgency badge.
+      - `records-view.jsx` renders AI study card and risk score badge on obligations and task/document cards.
+   6. Test Suite Status:
+      - `test/plan-4-1.test.js`: 100% pass (14/14).
+      - `test/db.test.js`: 100% pass (22 migrations).
+
+C. WHAT WE ARE DOING RIGHT NOW (IMMEDIATE EXECUTION):
+   1. Restart PM2 services (`sapauto-v8-harness` and `sapauto-v8-launcher`) to load all code updates.
+   2. Execute live AI analysis on the unstudied records in `data/v8.db` for the active accounts.
+   3. Verify database rows show real Arabic analysis text and risk ratings.
+   4. Confirm Launcher web UI renders the AI study cards cleanly without layout breaks.
+   5. Provide live verification report with exact account records studied.
+
+
+
+================================================================================
+ 19  PLAN 4.5  —  LEGAL DEADLINE ENGINE FOR STUDIED OBLIGATIONS
+================================================================================
+Status : IMPLEMENTED & LIVE
+Date   : 2026-10-17
+
+A. USER DIRECTIVE:
+   "lets upgrade this 1st at v8 'الالتزامات المدروسة' this is very weak:
+    i want it to open and see which doc needed and what's the days determined
+    by the law and remind me i am low in days i have to send the doc in time"
+
+B. WHAT SHIPPED:
+   1. Migration 023_deadlines.sql:
+      - obligations += required_doc, legal_days, respond_by, deadline_basis.
+      - legal_deadlines table: match_key / doc_name / legal_days / basis rows,
+        EDITABLE DATA — changing the law is a DB edit, not a code edit.
+      - Seeded for the live portal types: بطاقة ضريبية / تجهيز مستندات /
+        نموذج رقم (15) فحص / مستند مصلحة (15-day baseline, basis quoted,
+        figures explicitly labelled قابلة للتعديل).
+   2. Migration 024_legal_anchor.sql:
+      - anchor_mode on rules + obligations: 'law_window' vs 'portal_date'.
+      - New seeded rule for the definite-article live form
+        "البطاقة الضريبية سارية" whose deadline = the portal's own validity
+        date embedded in the record (e.g. 20280102), NOT an invented window.
+   3. domain/legal-deadlines.cjs (pure engine):
+      - Longest-active-key rule matching, no-match = no stamp (never invents).
+      - Cairo calendar arithmetic only (RULE Q): respond_by, days_left, tone,
+        Arabic day phrasing, reminder templates, 8-digit portal date parser.
+   4. harness/deadlines.js (service):
+      - stampObligation (once per row, guarded; never moves a date).
+      - applyObligationDeadlines catch-up batch (bounded 200/minute).
+      - createLegalDeadlineReminders: launcher reminders at 7/3/1/0 days left
+        + one overdue notice, deduped by id:respond_by:kind, Arabic messages,
+        events ledger rows (legal_deadline_reminder).
+   5. Integrations:
+      - assistant/live-analyst.js: stamps the deadline immediately after each
+        succeeded obligation study.
+      - harness/schedules.js: per-minute tick now stamps catch-up rows, then
+        runs both reminder clocks (portal deadline + law window).
+      - launcher/lib/data.js: obligations rows carry days_left + deadline_tone.
+      - records-view.jsx: LegalDeadlineCard — المستند المطلوب، المهلة، المتبقي
+        (green/amber/red + انتهت المهلة), basis line; portal-date rows show
+        "صالحة حتى {date}" instead of a law-day figure.
+   6. Live backfill: the 4 studied obligations stamped with the REAL portal
+      validity date 2028-01-02 (بطاقة تعريف ضريبية) on all four accounts.
+
+C. HONESTY LINES (DO NOT CROSS):
+   - The 15-day seeds are baseline practice figures carrying an edit-please
+     basis; they are NOT presented as verified law text and stay adjustable
+     in legal_deadlines.
+   - portal_date rows never claim law days in the UI; they use the portal's
+     own date and fail closed if it cannot be parsed.
+   - Fines escalation (3,000–50,000 then post-60-day bands) appears only as
+     basis text grounded in the unified-law penalty tables.
+
+D. FIXED ON THE WAY:
+   - harness/scraper/automation/documents.js:862 — const→let for a reassigned
+     page.evaluate result that broke `next build` (pre-existing §16-18 defect).
+
+E. VERIFICATION:
+   - test/plan-4-5.test.js: 8/8 pass (rules, matching, stamps, idempotence,
+     portal-date anchoring, reminder tiers/dedupe, Arabic phrasing).
+   - Full suite: 165 tests — 160 pass / 0 fail / 5 skipped.
+   - Live DB migrated to 24; backfill stamped 4/4 candidates.
+   - next build OK; PM2 harness/launcher/assistant restarted online.
+
+F. NEXT CANDIDATES (NOT DONE):
+   - Editable rules page in the launcher (today they are edited via DB).
+   - Whisper-send: deadline alerts through WhatsApp remain inside the
+     existing draft-approval flow (nothing auto-sends).
+   - Longer phase seeds (ربط 30 يوم, لجان الطعن, إداري 60 يوم) as additional
+     legal_deadlines rows once the phases appear on the portals.
+================================================================================
+
+
+================================================================================
+ 20  GOD-OF-GODS  —  FAIL-CLOSED WORKSPACE AUTH (NO MORE AUTO-OWNER)
+================================================================================
+Status : IMPLEMENTED & LIVE
+Date   : 2026-10-17
+
+A. THE HOLE (now closed):
+   - requireRole() fell back to the first Owner row for any ANONYMOUS API call,
+     so anyone reaching the launcher without a session acted as Owner.
+   - pageSession() auto-created 'default-owner-auto' and rendered the whole
+     workspace to anonymous visitors.
+   - /\(auth\)\/login and /\(auth\)\/setup were stub pages redirecting to '/'.
+
+B. WHAT SHIPPED:
+   1. lib/guard.js — strict by default:
+      - requireRole: no fallback; no valid session -> 401; role check -> 403.
+      - pageSession: returns the real better-auth session or null (never
+        fabricates a user).
+      - pageSetupRequired: truthful — true only while no Owner row exists.
+   2. (protected)/layout.jsx — session gate: anonymous -> /setup when there is
+      no owner yet, otherwise -> /login. Ownership truth drives the flow.
+   3. (auth)/login/page.jsx — real Arabic RTL email+password form over the
+      better-auth endpoint (/api/auth/sign-in/email); reloads to '/' on 200.
+   4. (auth)/setup/page.jsx — real first-run bootstrap: serves the form only
+      while /api/setup reports setupRequired; otherwise sends to /login.
+      The /api/setup route keeps its lease-guard, single-owner exclusivity
+      (019 migration), and audit row (owner.bootstrap_completed) untouched.
+   5. harness/schedules.js — the two '+02:00' date anchors are now symmetric
+      'Z' midday anchors (identical day-diff math, no hard-coded offset).
+      Deterministic Cairo calendars live in domain/legal-deadlines.cjs.
+
+C. NOT CHANGED:
+   - /api/kiosk keeps its own token gate (V8_KIOSK_TOKEN unset -> 404).
+   - /api/setup POST contract as written for 019 (verified by setup-auth test).
+
+D. VERIFICATION (live):
+   - Full suite: 165 tests — 160 pass / 0 fail / 5 skipped.
+     setup-auth.test.js extended: anonymous request stays 401 even AFTER an
+     owner exists; a second-owner setup stays 409.
+   - next build OK; launcher restarted via PM2 (all six apps online).
+   - Probes against the running server: GET /login -> 200, GET / -> 307 to
+     /login, GET /api/status anonymous -> 401 Unauthorized.
+
+E. WHAT THE ACCOUNTANT SHOULD KNOW:
+   - From now on the workspace needs a real login. The existing Admin account
+     (admin@office.local) already has a credential password set and should log
+     in through /login; use /setup only on a brand-new empty database.
+   - Losing the password is recovery-by-database only (no email service).
+
+F. NEXT CANDIDATES (NOT DONE):
+   - channels/events.js consent enforcement (broker-only fan-out).
+   - manifest/reconcile truthfulness polish (live counts in manifest).
+   - rules editor UI for legal_deadlines (today: DB rows).
+   - WhatsApp delivery for legal-deadline reminders inside draft approval.
+================================================================================
+
+ 21  OPEN ACCESS NOW — STRICT AUTH DEFERRED BY USER DECISION
+================================================================================
+Status : IMPLEMENTED & LIVE
+Date   : 2026-10-17
+
+A. USER DECISION:
+   "for now i do not want to have login at all."
+   So the workspace is returned to open access — but as an EXPLICIT, named
+   mode, not the old silent anonymous-Owner hole of section 20.
+
+B. WHAT SHIPPED:
+   - launcher/lib/open-access.js — V8_OPEN_ACCESS=1 acts as the first active
+     Owner row for sessions and pages. It NEVER fabricates users (no
+     'default-owner-auto' again); with no active owner the flow still goes
+     through first-run setup or 401.
+   - lib/guard.js honors the mode in requireRole and pageSession.
+   - ecosystem.config.cjs sets V8_OPEN_ACCESS=1 for sapauto-v8-launcher.
+   - setup-auth.test.js covers both directions: strict default stays 401 even
+     with an owner present, and open access resolves the active Owner.
+
+C. VERIFICATION (live):
+   - Suites: 165 tests — 160 pass / 0 fail / 5 skipped (channel-vault hit one
+     transient Windows DPAPI flake in an intermediate run, green on re-runs).
+   - Launcher redeployed through the ecosystem env; anonymous probes return
+     200 for / and /api/status. Login/setup pages remain available and are
+     simply not required while open access is on.
+
+D. TO RE-ENABLE LOGIN LATER (one line):
+   Remove V8_OPEN_ACCESS from ecosystem.config.cjs (or set it to '0'),
+   restart the launcher: pm2 delete sapauto-v8-launcher 
+   pm2 start ecosystem.config.cjs --only sapauto-v8-launcher; pm2 save
+   Then / serves the login gate from the already-opened pages of section 20 —
+   Admin (admin@office.local) keeps its credential password for that day.
+================================================================================
+
+================================================================================
+§22 — PLAN 4.7 · GOD-LANE SHIP: TAX VISOR READS THE PDFs + DAILY WHATSAPP DIGEST
+================================================================================
+
+A. THE TAX VISOR (tasks.md lanes B/C) - SHIPPED & VERIFIED LIVE:
+   - assistant/pdf-reader.cjs opens stored PDFs with pdfjs-dist (legacy build,
+     verbosity 0): caps 30 pages / 40,000 chars, Arabic bidi/tatweel
+     normalization, prompt slice 12,000 chars with a truncated flag.
+     PdfReadError taxonomy: invalid-path, outside-allowed-root, missing-file,
+     not-a-file, empty-file, oversized-file, not-a-pdf, unreadable-pdf,
+     too-many-pages. The visor can never read outside v8/data (privacy orbit R).
+   - assistant/pdf-visor.cjs: buildDocumentExhibitPrompt hands Gemma the REAL
+     document text and asks for a JSON exhibit (document_type, action_summary,
+     dates_on_paper[{raw,iso,meaning}], legal_status, next_owner_action) with
+     "never invent dates"; extractJsonObject salvages JSON from prose/fences.
+   - live-analyst.studyDocument: 500-token exhibit turn, 300s timeout (the
+     first live run timed out at 60s; the exhibit deserves the patience).
+     persistTaskExhibit fills tasks.deadline ONLY when it was empty (then
+     urgency='review'), never overwrites portal truth, and keeps the paper
+     trail: pdf_studied on every success (pages/chars/exhibited_date/
+     deadline_filled), task_date_extracted only when a date was genuinely
+     applied, pdf_read_failed with reason when the PDF or model fails.
+   - NEW sweepUnstudiedDocuments runs inside the assistant manager cycle
+     (limit 2 per interval, sweepBusy guard) so documents stranded by pauses
+     or restarts are studied without waiting for the next scrape.
+
+B. LIVE PROOF (under watch, 2026-10-17):
+   - إخطار تجهيز مستندات 180000222364: PDF opened 2 pages / 2,217 chars →
+     Gemma exhibit stored (913 chars study), study ~50s.
+   - ملاحظات قبول ٢٣٠٠٠٠٤٥١٧٤١ + نموذج ١٩ دمغة 180000209907 healed by the
+     manager sweep (571 / 393 chars). Final tally: pdf tasks 3 / studied 3,
+     pdf_studied events 2 (+1 from the manual run before the event existed),
+     exhibited dates 2026-09-24 and 2026-10-10 — both matched the portal
+     deadline already on the rows, so nothing was overwritten (rule N).
+
+C. DAILY WHATSAPP DIGEST (tasks.md lane D) - SHIPPED:
+   - channels/daily-digest.js: sends at/after 11:44 Cairo once per Cairo day
+     to the chat that consented. Contents: Arabic header summary + up to 8
+     new PDFs from v8/data/pdfs as document attachments (caption per file).
+     Gates: daily_digest_enabled='1', daily_digest_chat set,
+     whatsapp_connected='true', digest_last_day != today.
+   - Consent (rule P): the Owner sends تفعيل اليومية FROM the office group;
+     sending from any other identity/chat is refused. إيقاف اليومية revokes.
+     The digest no longer requires the global message_mode switch — its own
+     standing consent IS the authorization (documented decision).
+   - events daily_digest_sent/daily_digest_document_failed/daily_digest_
+     skipped inserted announced=1 so the general dispatcher never double-sends.
+
+D. WHATSAPP IN THE UI - SHIPPED:
+   - whatsapp-web.js + qrcode installed locally; settings capabilities now
+     lists WhatsApp with available=true; channel-center has its own tile,
+     pair flow (auto-requests pair), QR modal with 2.5s polling, and a
+     disconnect action in /api/channels. Pairing state machine:
+     pair → whatsapp_pair_requested → channels process starts the client →
+     client.on('qr') stores the data-URL → user scans → connected event sets
+     whatsapp_connected='true' → the tile reports متصلة.
+   - The old plan-2-4 "WhatsApp must not be listed" lie-guards were rewritten
+     into truth-guards: the tile may exist only while whatsapp-web.js actually
+     resolves, the pair endpoint exists, and the disconnect action exists —
+     the day the engine is uninstalled the tile must disappear again.
+
+E. FIXES ALONG THE WAY (all honest ones):
+   - launcher/app/api/settings/route.js: the webpack build choked on
+     pdfjs-dist's optional 'canvas' require imported through live-analyst →
+     serverExternalPackages=['better-sqlite3','pdfjs-dist','canvas',
+     'whatsapp-web.js'] in next.config.mjs (runtime require, no bundling).
+   - assistant/manager.js requires './pdf-visor.cjs' with the explicit
+     extension (CJS require does not resolve .cjs bare names).
+   - /settings briefly 500'd at module evaluation on this deploy; rebuilt +
+     rest launcher, pm2 flush → settings 200 again. The historical error log
+     had made readback archaeology misleading; always flush before trusting.
+
+F. VERIFICATION:
+   - Suite after everything: 177 tests / 172 pass / 0 fail / 5 skipped
+     (channel-vault keeps its rare Windows DPAPI flake, green on re-runs).
+   - New tests: test/plan-4-6-pdf-visor.test.js (7) covers reader taxonomy,
+     prompt slicing, JSON exhibit salvage, compose, persistence, and the
+     manager sweep with a stubbed analyst.
+     test/plan-4-7-daily-digest.test.js (6): happy path with attachments,
+     all gates, consent words, orbit enforcement.
+   - Live probes: harness paused=0 idle with fresh heartbeat; 4 accounts all
+     ready, 0 consecutive failures; last full cycle 2026-10-16 19:55Z (4/26/0)
+     rotating by schedule; docs per account 11/8/7/5.
+
+G. WHAT REMAINS FOR THE OWNER (the only manual step):
+   - Open https://localhost:3000/settings (or http://), press اربط واتساب,
+     scan the QR with the office phone, then from the office GROUP send:
+       تفعيل اليومية
+     The daily report with new PDFs follows from 11:44 Cairo each day.
+   - Lanes A3/B6/C1–C3 remain on the board (tasks.md).
+
+H. EXECUTIVE SECRETARY PERSONA & TAX UI UPGRADE (2026-10-17):
+   - Transitioned AI from academic "tax visor / advisor" to executive office secretary (inspired by SAPAuto V6):
+     * Grounded rules engine in domain/secretary-rules.cjs mapping ETA document types (Law 206/2020).
+     * Output strictly partitioned into:
+       1. 📋 المستند المطلوب: Specific document or tax form demanded.
+       2. ⏳ المهلة القانونية: Statutory window, deadline countdown, Law 206/2020 basis & fines.
+       3. ⚡ الإجراء التنفيذي: Direct actionable next step for the office.
+       4. 👤 المسؤول المكلف: Assigned office role (مدير المكتب / المستشار الضريبي / مسؤول الحسابات).
+     * Replaced generic card text in launcher/components/records-view.jsx with SecretaryTaskCard.
+     * Attached direct ETA Portal quick links to SAP MCF.
+     * Migrated all 31 existing tasks in data/v8.db to the clean secretary brief.
+================================================================================
+

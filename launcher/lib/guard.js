@@ -1,11 +1,33 @@
 import { auth } from './auth.js'
 import { db } from './db.js'
+import { openAccessEnabled, fallbackWorkspaceUser } from './open-access.js'
 
 const ROLE_LEVEL = { Viewer: 0, Operator: 1, Owner: 2 }
 
 export async function requireRole(request, minimum = 'Viewer') {
-  const session = await auth.api.getSession({ headers: request.headers })
+  let session
+  try {
+    session = await auth.api.getSession({ headers: request.headers })
+  } catch {
+    return { response: Response.json({ error: 'Authentication required' }, { status: 401 }) }
+  }
   if (!session || session.user.disabled) {
+    if (openAccessEnabled()) {
+      const owner = fallbackWorkspaceUser(db)
+      if (owner) {
+        return {
+          session: {
+            user: {
+              id: owner.id,
+              name: owner.name,
+              email: owner.email,
+              role: owner.role,
+              disabled: false
+            }
+          }
+        }
+      }
+    }
     return { response: Response.json({ error: 'Authentication required' }, { status: 401 }) }
   }
   if ((ROLE_LEVEL[session.user.role] ?? -1) < ROLE_LEVEL[minimum]) {
@@ -32,9 +54,28 @@ export function requireSameOrigin(request) {
 
 export async function pageSession() {
   const { headers } = await import('next/headers')
-  return auth.api.getSession({ headers: await headers() })
+  try {
+    const session = await auth.api.getSession({ headers: await headers() })
+    if (session?.user && !session.user.disabled) return session
+  } catch {}
+  if (openAccessEnabled()) {
+    const owner = fallbackWorkspaceUser(db)
+    if (owner) {
+      return {
+        user: {
+          id: owner.id,
+          name: owner.name,
+          email: owner.email,
+          role: owner.role,
+          disabled: false
+        }
+      }
+    }
+  }
+  return null
 }
 
 export function pageSetupRequired() {
-  return db.prepare('SELECT COUNT(*) AS count FROM users').get().count === 0
+  return !db.prepare('SELECT role FROM users WHERE role=? LIMIT 1').get('Owner')
 }
+

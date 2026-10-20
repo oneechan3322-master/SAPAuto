@@ -9,6 +9,9 @@ const tools = {
   add_reminder: { minimumRole: 'Operator', run: require('./add-reminder'), parameters: { type: 'object', properties: { description: { type: 'string', maxLength: 300 }, target: { type: 'string', maxLength: 200 }, target_type: { type: 'string', enum: ['general', 'task', 'obligation', 'payment'] }, when: { type: 'string' }, channel: { type: 'string', enum: ['launcher', 'telegram', 'whatsapp', 'email'] } }, required: ['when'], additionalProperties: false } },
   mark_obligation_done: { minimumRole: 'Operator', run: require('./mark-obligation-done'), parameters: { type: 'object', properties: { obligation_id: { type: 'string' }, evidence: { type: 'string' } }, required: ['obligation_id'], additionalProperties: false } },
   send_report: { minimumRole: 'Operator', run: require('./send-report'), parameters: { type: 'object', properties: { channel: { type: 'string', enum: ['telegram', 'whatsapp', 'email'] }, recipients: { type: ['string', 'array'] } }, required: ['channel'], additionalProperties: false } },
+  list_documents: { minimumRole: 'Viewer', run: require('./list-documents'), parameters: { type: 'object', properties: {}, additionalProperties: false } },
+  send_pdf: { minimumRole: 'Operator', run: require('./send-pdf'), parameters: { type: 'object', properties: { task_id: { type: 'string', minLength: 1, maxLength: 120 } }, required: ['task_id'], additionalProperties: false } },
+  send_pdf_email: { minimumRole: 'Operator', run: require('./send-pdf-email'), parameters: { type: 'object', properties: { task_id: { type: 'string', minLength: 1, maxLength: 120 }, email: { type: 'string', format: 'email', minLength: 5, maxLength: 200 } }, required: ['task_id', 'email'], additionalProperties: false } },
   scan_now: { minimumRole: 'Operator', run: require('./scan-now'), parameters: { type: 'object', properties: { account: { type: 'string' } }, additionalProperties: false } },
   request_code_upgrade: { minimumRole: 'Owner', run: require('./request-code-upgrade'), parameters: { type: 'object', properties: { request: { type: 'string', minLength: 1, maxLength: 1500 } }, required: ['request'], additionalProperties: false } }
 }
@@ -16,6 +19,10 @@ const tools = {
 const WRITE_TOOLS = new Set([
   'save_note', 'add_task', 'add_reminder', 'mark_obligation_done', 'send_report', 'scan_now', 'request_code_upgrade'
 ])
+// send_pdf and send_pdf_email are deliberately NOT confirmation tools: they can only queue
+// delivery to the Owner's own control number or a caller-supplied address, and the
+// channels worker re-verifies the file orbit before anything actually leaves.
+const IMMEDIATE_TOOLS = new Set(['list_documents', 'send_pdf', 'send_pdf_email'])
 
 function definitions() {
   return Object.entries(tools).map(([name, tool]) => ({
@@ -38,4 +45,4 @@ function authorizeTool(name, role) {
   if ((levels[role] ?? -1) < levels[item.minimumRole]) throw new Error('Insufficient role for this assistant action')
 }
 
-module.exports = { tools, definitions, execute, authorizeTool, WRITE_TOOLS }
+module.exports = { tools, definitions, execute, authorizeTool, WRITE_TOOLS, IMMEDIATE_TOOLS }

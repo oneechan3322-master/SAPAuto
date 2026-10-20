@@ -1,4 +1,4 @@
-'use strict'
+﻿'use strict'
 
 const { isIP } = require('node:net')
 const { getDatabase } = require('../db/connect')
@@ -107,29 +107,70 @@ async function chatMistral(messages, tools) {
   if (runtimeSetting('ai_allow_cloud', 'false') !== 'true') {
     throw new Error('Mistral is disabled; set AI_ALLOW_CLOUD=true only after accepting that prompts and selected SAPAuto context are sent to Mistral')
   }
-  const apiKey = process.env.MISTRAL_API_KEY
-  if (!apiKey) throw new Error('MISTRAL_API_KEY is required when AI_PROVIDER=mistral')
-
-  const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: process.env.MISTRAL_MODEL || 'mistral-small-latest',
-      messages,
-      tools,
-      ...(tools.length ? { tool_choice: 'auto' } : {})
-    }),
-    signal: AbortSignal.timeout(120000),
-    redirect: 'error'
-  })
-  if (!response.ok) throw new Error(`Mistral returned HTTP ${response.status}`)
-  const result = await response.json()
-  const message = result.choices && result.choices[0] && result.choices[0].message
-  if (!message) throw new Error('Mistral returned an invalid chat response')
-  return { content: message.content || '', toolCalls: normalizeToolCalls(message.tool_calls) }
+  
+  // Get all available Mistral API keys
+  const allKeys = (process.env.MISTRAL_API_KEYS || process.env.MISTRAL_API_KEY || '')
+    .split(',')
+    .map(k => k.trim())
+    .filter(Boolean)
+  
+  if (allKeys.length === 0) {
+    throw new Error('MISTRAL_API_KEY is required when AI_PROVIDER=mistral')
+  }
+  
+  // Try each key until one works (automatic rotation on rate limit)
+  let lastError = null
+  for (const [index, apiKey] of allKeys.entries()) {
+    try {
+      const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: process.env.MISTRAL_MODEL || 'mistral-small-latest',
+          messages,
+          tools,
+          ...(tools.length ? { tool_choice: 'auto' } : {})
+        }),
+        signal: AbortSignal.timeout(120000),
+        redirect: 'error'
+      })
+      
+      // If rate limited (429), try next key
+      if (response.status === 429) {
+        console.log(`Mistral key ${index + 1}/${allKeys.length} rate-limited, trying next...`)
+        lastError = new Error(`Key ${index + 1} rate-limited`)
+        continue
+      }
+      
+      if (!response.ok) {
+        throw new Error(`Mistral returned HTTP ${response.status}`)
+      }
+      
+      const result = await response.json()
+      const message = result.choices && result.choices[0] && result.choices[0].message
+      if (!message) throw new Error('Mistral returned an invalid chat response')
+      
+      // Success! Log which key worked
+      if (index > 0) {
+        console.log(`Mistral request succeeded with key ${index + 1}/${allKeys.length}`)
+      }
+      
+      return { content: message.content || '', toolCalls: normalizeToolCalls(message.tool_calls) }
+      
+    } catch (error) {
+      lastError = error
+      // If not rate limit error, don't try other keys
+      if (!error.message.includes('429') && !error.message.includes('rate')) {
+        throw error
+      }
+    }
+  }
+  
+  // All keys failed
+  throw new Error(`All ${allKeys.length} Mistral API keys are rate-limited. Try again later or use Gemma 4 (AI_PROVIDER=gemma4)`)
 }
 
 /**

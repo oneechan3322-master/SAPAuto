@@ -1,16 +1,16 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Mail, Send, X } from 'lucide-react'
+import { Mail, MessageCircle, Send, X } from 'lucide-react'
 
 /**
- * Plan 2.4 §3.3 — a channel is listed only when it can genuinely be used.
- * WhatsApp was removed rather than shown as "coming soon": a tile that
- * cannot work is a false affordance, and the plan allows no alternative.
+ * A channel is not connected because its package is installed. The visible
+ * state must be earned by a verified credential or WhatsApp `ready` signal.
  */
 const channelInfo = [
   { id: 'email', title: 'Gmail', description: 'ملخصاتك وتنبيهاتك تصل إلى بريدك.', action: 'اربط بريدك' },
-  { id: 'telegram', title: 'Telegram', description: 'تنبيهات خفيفة ومحادثة مباشرة مع مساعدك.', action: 'اربط بوتك' }
+  { id: 'telegram', title: 'Telegram', description: 'تنبيهات خفيفة ومحادثة مباشرة مع مساعدك.', action: 'اربط بوتك' },
+  { id: 'whatsapp', title: 'WhatsApp', description: 'التقرير اليومي والمستندات الجديدة تصل جروب المكتب.', action: 'اربط واتساب' }
 ]
 
 async function readResponse(response) {
@@ -36,29 +36,29 @@ export default function ChannelCenter({
   const [error, setError] = useState('')
   const [whatsapp, setWhatsapp] = useState({ paired: false, pairingRequested: false, qr: '', available: whatsappAvailable })
   const [pairingError, setPairingError] = useState('')
+  const [controlNumber, setControlNumber] = useState('')
   const [confirmDelivery, setConfirmDelivery] = useState(false)
   const modalRef = useRef(null)
   const deliveryConfirmRef = useRef(null)
 
   useEffect(() => {
     let active = true
-    let timer
     const refresh = async () => {
       try {
-        const state = await readResponse(await fetch('/api/channels', { cache: 'no-store' }))
+        const state = await readResponse(await fetch(`/api/channels?live=${Date.now()}`, { cache: 'no-store' }))
         if (!active) return
         setWhatsapp(state.whatsapp)
-        if (state.whatsapp.pairingRequested && !state.whatsapp.paired) {
-          timer = setTimeout(refresh, 2500)
-        }
+        setControlNumber(state.whatsapp.controlNumber || '')
+        setPairingError('')
       } catch {
         if (active) setPairingError('تعذر تحديث حالة ربط الهاتف.')
       }
     }
     void refresh()
+    const timer = window.setInterval(refresh, 5000)
     return () => {
       active = false
-      clearTimeout(timer)
+      window.clearInterval(timer)
     }
   }, [])
 
@@ -131,6 +131,11 @@ export default function ChannelCenter({
     setModalChannel(channel)
   }
 
+  function openWhatsAppConnect() {
+    setPairingError('')
+    setModalChannel('whatsapp')
+  }
+
   function closeConnect() {
     setModalChannel('')
     setEmail('')
@@ -161,9 +166,7 @@ export default function ChannelCenter({
     } finally {
       setSubmitting(false)
     }
-  }
-
-  async function pairWhatsApp() {
+  }  async function pairWhatsApp() {
     setSubmitting(true)
     setPairingError('')
     try {
@@ -174,6 +177,43 @@ export default function ChannelCenter({
       }))
       setWhatsapp(result.state.whatsapp)
       setPairingError('')
+    } catch (caught) {
+      setPairingError(caught.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function disconnectWhatsApp() {
+    setSubmitting(true)
+    setPairingError('')
+    try {
+      await readResponse(await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channel: 'whatsapp', action: 'disconnect' })
+      }))
+      setWhatsapp((current) => ({ ...current, paired: false, pairingRequested: false, qr: '' }))
+      await onConnected()
+    } catch (caught) {
+      setPairingError(caught.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function saveControlNumber(event) {
+    event.preventDefault()
+    setSubmitting(true)
+    setPairingError('')
+    try {
+      const result = await readResponse(await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channel: 'whatsapp', action: 'save_control_number', controlNumber })
+      }))
+      setWhatsapp(result.state.whatsapp)
+      setControlNumber(result.state.whatsapp.controlNumber || '')
     } catch (caught) {
       setPairingError(caught.message)
     } finally {
@@ -194,30 +234,52 @@ export default function ChannelCenter({
 
       <div className="channel-cards">
         {channelInfo.map((channel) => {
-          const connected = Boolean(channels.find((item) => item.id === channel.id)?.configured)
+          const record = channels.find((item) => item.id === channel.id) || {}
+          const channelStatus = channel.id === 'whatsapp'
+            ? (whatsapp.paired ? 'connected' : (whatsapp.pairingRequested ? 'pairing' : 'unconfigured'))
+            : (record.status || (record.configured ? 'configured' : 'unconfigured'))
+          const connected = channelStatus === 'connected'
+          const stateLabel = channelStatus === 'connected'
+            ? 'متصلة ومتحقق منها'
+            : channelStatus === 'configured'
+              ? 'مهيأة — اختبار التسليم مطلوب'
+              : channelStatus === 'pairing'
+                ? 'بانتظار مسح QR'
+                : 'غير مهيأة'
           return (
             <article className={`channel-card-luxe ${connected ? 'is-connected' : ''}`} key={channel.id}>
               <div className={`channel-brand channel-brand-${channel.id}`} aria-hidden="true">
                 {channel.id === 'email' ? <Mail size={23} strokeWidth={1.65} />
+                  : channel.id === 'whatsapp' ? <MessageCircle size={22} strokeWidth={1.65} />
                   : <Send size={22} strokeWidth={1.65} />}
               </div>
               <div className="channel-card-copy">
                 <div className="channel-card-title-row">
                   <h3>{channel.title}</h3>
                   <span className={`channel-connection ${connected ? 'connected' : ''}`}>
-                    {connected ? 'متصلة' : 'جاهزة للربط'}
+                    {stateLabel}
                   </span>
                 </div>
-                <p>{channel.description}</p>
-                {!connected && (
+                <p>{record.description || channel.description}</p>
+                {!connected ? (
                   <button
                     className="channel-connect-button"
                     type="button"
                     disabled={submitting}
-                    onClick={() => openConnect(channel.id)}
+                    onClick={() => channel.id === 'whatsapp' ? openWhatsAppConnect() : openConnect(channel.id)}
                   >
                     {channel.action}
                     <span aria-hidden="true">←</span>
+                  </button>
+                ) : (
+                  <button
+                    className="channel-connect-button button-secondary"
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => channel.id === 'whatsapp' ? openWhatsAppConnect() : openConnect(channel.id)}
+                  >
+                    إدارة القناة
+                    <span aria-hidden="true">⚙</span>
                   </button>
                 )}
               </div>
@@ -280,7 +342,89 @@ export default function ChannelCenter({
         </div>
       )}
 
-      {modalChannel && (
+      {modalChannel === 'whatsapp' && (
+        <div className="connect-modal-backdrop" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closeConnect()
+        }}>
+          <section
+            className="connect-modal"
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="whatsapp-modal-title"
+          >
+            <button className="connect-modal-close" type="button" aria-label="إغلاق" onClick={closeConnect}>
+              <X size={18} />
+            </button>
+            <span className="channel-brand channel-brand-whatsapp" aria-hidden="true"><MessageCircle size={22} /></span>
+            <span className="channel-eyebrow">خطوة واحدة وتصبح أقرب</span>
+            <h2 id="whatsapp-modal-title">اربط واتساب</h2>
+            <form className="connect-form" onSubmit={saveControlNumber}>
+              <label>
+                <span>رقم واتساب المسموح له بمخاطبة المساعد</span>
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  value={controlNumber}
+                  onChange={(event) => setControlNumber(event.target.value)}
+                  placeholder="+201126170117"
+                  dir="ltr"
+                  required
+                />
+              </label>
+              <p className="connect-modal-description">هذا هو رقم التحكم الوحيد: يستقبل التنبيهات ويمكنه طلب الملخصات وقراءة ملفات PDF. لا يرد المساعد على أي رقم آخر.</p>
+              {pairingError && <p className="connect-form-error" role="alert">{pairingError}</p>}
+              <button className="connect-submit" type="submit" disabled={submitting}>حفظ رقم التحكم</button>
+            </form>
+            {whatsapp.paired ? (
+              <>
+                <p className="connect-modal-description">
+                  واتساب متصل. لتشغيل التقرير اليومي داخل جروب المكتب، أرسل كلمة <strong>تفعيل اليومية</strong> من الجروب نفسه.
+                </p>
+                <div className="delivery-confirm-actions">
+                  <button className="button-secondary" type="button" onClick={closeConnect}>إغلاق</button>
+                  <button className="connect-submit" type="button" disabled={submitting} onClick={disconnectWhatsApp}>قطع الاتصال</button>
+                </div>
+              </>
+            ) : whatsapp.qr ? (
+              <>
+                <p className="connect-modal-description">
+                  افتح واتساب على هاتفك ← الأجهزة المرتبطة ← ربط جهاز جديد، ثم امسح الرمز التالي.
+                </p>
+                <div style={{ display: 'grid', placeItems: 'center', gap: 8 }}>
+                  <img src={whatsapp.qr} alt="رمز واتساب للمسح" width={220} height={220} style={{ borderRadius: 8 }} />
+                  <span className="channel-eyebrow">الرمز يتجدد تلقائيًا</span>
+                </div>
+                {whatsapp.pairingCode && (
+                  <div className="connect-modal-description" style={{ marginTop: 16, padding: 12, border: '1px solid #b7e4d9', borderRadius: 10, background: '#f0fdf9' }}>
+                    <strong>{'\u0627\u0644\u0631\u0628\u0637 \u0628\u0631\u0642\u0645 \u0627\u0644\u0647\u0627\u062a\u0641'}</strong>
+                    <p>{'\u0641\u064a WhatsApp: \u0627\u0644\u0623\u062c\u0647\u0632\u0629 \u0627\u0644\u0645\u0631\u062a\u0628\u0637\u0629 \u2190 \u0631\u0628\u0637 \u062c\u0647\u0627\u0632 \u2190 \u0631\u0628\u0637 \u0628\u0631\u0642\u0645 \u0627\u0644\u0647\u0627\u062a\u0641\u060c \u062b\u0645 \u0623\u062f\u062e\u0644 \u0627\u0644\u0631\u0645\u0632:'}</p>
+                    <code dir="ltr" style={{ display: 'inline-block', padding: '7px 12px', fontSize: 20, letterSpacing: 3, fontWeight: 800, background: '#fff', borderRadius: 6 }}>{whatsapp.pairingCode}</code>
+                  </div>
+                )}
+                <div className="delivery-confirm-actions">
+                  <button className="button-secondary" type="button" onClick={closeConnect}>لاحقًا</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="connect-modal-description">
+                  نبدأ جلسة واتساب محلية على جهازك مباشرة؛ الجلسة تبقى مخزنة محليًا ولا تخرج بياناتها من الجهاز.
+                </p>
+                {pairingError && <p className="connect-form-error" role="alert">{pairingError}</p>}
+                <div className="delivery-confirm-actions">
+                  <button className="button-secondary" type="button" onClick={closeConnect}>ليس الآن</button>
+                  <button className="connect-submit" type="button" disabled={submitting} onClick={pairWhatsApp}>
+                    {submitting ? 'جارٍ التجهيز…' : whatsapp.pairingRequested ? 'جارٍ توليد الرمز…' : 'ابدأ الربط'}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
+      {modalChannel && modalChannel !== 'whatsapp' && (
         <div className="connect-modal-backdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) closeConnect()
         }}>

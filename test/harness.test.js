@@ -9,7 +9,7 @@ const { openDatabase } = require('../db/connect')
 const { runMigrations } = require('../db/migrate')
 const { createCommand } = require('../db/queries/commands')
 const { runLoop, scanOne } = require('../harness/loop')
-const { baseDirectory } = require('../harness/source')
+const { listAccounts } = require('../harness/source')
 const { minutesUntilQuietEnd, nextCycleTime } = require('../harness/quiet-hours')
 const { ingestAccount } = require('../harness/ingest')
 const { processOneControlCommand } = require('../harness/commands')
@@ -130,19 +130,15 @@ test('quiet hours delay automatic cycles using Cairo time', () => {
   )
 })
 
-test('SAPAuto3 source path resolves from V8_ROOT when bundled by the launcher', () => {
-  const previousRoot = process.env.V8_ROOT
-  const previousBase = process.env.V8_BASE_DIR
-  process.env.V8_ROOT = 'C:\\sapauto\\v8'
-  delete process.env.V8_BASE_DIR
-  try {
-    assert.equal(baseDirectory(), path.resolve('C:\\sapauto\\v8', '..\\SAPAuto3'))
-  } finally {
-    if (previousRoot === undefined) delete process.env.V8_ROOT
-    else process.env.V8_ROOT = previousRoot
-    if (previousBase === undefined) delete process.env.V8_BASE_DIR
-    else process.env.V8_BASE_DIR = previousBase
-  }
+test('the account source is native to V8: empty store refuses a cycle', async (t) => {
+  const db = fixture(t)
+  await assert.rejects(() => listAccounts(db), /لا توجد حسابات مسجّلة في V8/)
+  db.prepare(`INSERT INTO accounts(account_key,username,label,secret_cipher,secret_iv,secret_tag,enabled,created_at,updated_at)
+    VALUES('acct-1','acct-1','Account One','c','i','t',1,'2026-10-16','2026-10-16')`).run()
+  const accounts = await listAccounts(db)
+  assert.equal(accounts.length, 1)
+  assert.equal(accounts[0].username, 'acct-1')
+  assert.deepEqual(Object.keys(accounts[0]).sort(), ['id', 'label', 'username'])
 })
 
 test('database automation setting takes precedence over environment enablement', async (t) => {

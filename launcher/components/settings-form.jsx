@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import ChannelCenter from './channel-center.jsx'
 import CapabilityCenter, { useCapabilityCenter } from './capability-center.jsx'
+import AccountsManager from './accounts-manager.jsx'
+import ApiKeysManager from './api-keys-manager.jsx'
 
 async function readJson(response) {
   const value = await response.json()
@@ -26,8 +28,24 @@ function Switch({ checked, disabled, label, onChange }) {
   )
 }
 
-function StatePill({ healthy, children }) {
-  return <span className={`state-pill ${healthy ? 'state-good' : 'state-muted'}`}><i />{children}</span>
+function StatePill({ healthy, tone, children }) {
+  const resolved = tone || (healthy ? 'good' : 'muted')
+  return <span className={`state-pill state-${resolved}`}><i />{children}</span>
+}
+
+/* Plan 4.1 §3: raw harness states must never reach the screen in English.
+   `interrupted` covers both a mid-cycle pause and a process that died with the
+   cycle still open — the two ways a scan stops without finishing. */
+const CYCLE_STATE_LABELS = {
+  running: { label: 'قيد الفحص', tone: 'busy' },
+  done: { label: 'مكتملة', tone: 'good' },
+  interrupted: { label: 'متوقفة', tone: 'muted' },
+  aborted: { label: 'متوقفة', tone: 'muted' },
+  failed: { label: 'فشلت', tone: 'bad' }
+}
+
+function cycleStateView(state) {
+  return CYCLE_STATE_LABELS[state] || { label: 'غير معروفة', tone: 'muted' }
 }
 
 function SettingRow({ title, description, value, disabled, label, onChange, danger = false }) {
@@ -333,7 +351,7 @@ export default function SettingsForm() {
             <select value={scanTarget} onChange={(event) => setScanTarget(event.target.value)} disabled={busy || !data.source.ready}>
               <option value="">اختر النطاق</option>
               {data.scanTargets.map((target) => <option key={target.account_key} value={target.account_key}>{target.name} — {target.account_key}</option>)}
-              <option value="*">كل حسابات SAPAuto3 الموجودة مسبقًا ({data.source.accountCount})</option>
+              <option value="*">كل حسابات V8 المسجّلة مسبقًا ({data.source.accountCount})</option>
             </select>
           </label>
           {startPaused
@@ -389,16 +407,28 @@ export default function SettingsForm() {
           ].map(([name, count]) => <div className="record-count" key={name}><span>{name}</span><strong>{count}</strong></div>)}
         </div>
         <div className="source-status between">
-          <div><strong>مصدر SAPAuto3 المحلي</strong><p className="muted">{data.source.ready ? `${data.source.accountCount} حسابًا موجودًا مسبقًا في إعدادات SAPAuto3؛ لم تتم إضافتها أو فحصها بفتح هذه الصفحة.` : data.source.error || 'لا توجد حسابات مهيأة'}</p></div>
+          <div><strong>مصدر الحسابات المحلي</strong><p className="muted">{data.source.ready ? `${data.source.accountCount} حسابًا مسجلًا في قاعدة بيانات V8؛ لم تتم إضافتها أو فحصها بفتح هذه الصفحة.` : data.source.error || 'لا توجد حسابات مهيأة'}</p></div>
           <StatePill healthy={data.source.ready}>{data.source.ready ? 'جاهز للفحص اليدوي' : 'غير جاهز'}</StatePill>
         </div>
-        {data.lastCycle && (
-          <div className="source-status between">
-            <div><strong>آخر دورة فحص</strong><p className="muted">{formatDate(data.lastCycle.started_at)} · {data.lastCycle.accounts_processed}/{data.lastCycle.accounts_total} تمت · {data.lastCycle.accounts_failed} إخفاق</p></div>
-            <span className="tag">{data.lastCycle.state}</span>
-          </div>
-        )}
+        {data.lastCycle && (() => {
+          const cycleView = cycleStateView(data.lastCycle.state)
+          return (
+            <div className="source-status between">
+              <div>
+                <strong>آخر دورة فحص</strong>
+                <p className="muted">
+                  {formatDate(data.lastCycle.started_at)} · {data.lastCycle.accounts_processed}/{data.lastCycle.accounts_total} تمت · {data.lastCycle.accounts_failed} إخفاق
+                </p>
+              </div>
+              <StatePill tone={cycleView.tone}>{cycleView.label}</StatePill>
+            </div>
+          )
+        })()}
       </section>
+
+      <AccountsManager />
+
+      <ApiKeysManager />
 
       <section className="guardrail-card">
         <span className="guardrail-symbol">✓</span>

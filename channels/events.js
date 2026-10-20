@@ -10,6 +10,78 @@ function messageMode(db = getDatabase()) {
   return row ? row.value : 'dry-run'
 }
 
+// Only these kinds may be coalesced into one grouped wake message. Kinds with
+// side effects (reminder_due, report_requested) always go through
+// deliverEvent individually.
+const WAKE_BATCHABLE = new Set([
+  'new_doc', 'changed_doc', 'deadline_reminder', 'assistant_attention', 'account_parked', 'harness_offline'
+])
+
+function wakeSettings(db) {
+  const enabled = db.prepare("SELECT value FROM settings WHERE key='whatsapp_wake_notifications'").get()?.value === 'true'
+  const controlNumber = db.prepare("SELECT value FROM settings WHERE key='whatsapp_control_number'").get()?.value || ''
+  return { enabled, controlNumber, externalId: controlNumber ? `${controlNumber.replace(/^\+/, '')}@c.us` : '' }
+}
+
+function clipped(value, max = 110) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+function wakeGroupText(events) {
+  const labels = {
+    new_doc: 'مستندات جديدة',
+    changed_doc: 'تحديثات مستندات',
+    deadline_reminder: 'تنبيهات مواعيد',
+    assistant_attention: 'ملاحظات المساعد',
+    account_parked: 'إيقاف فحص حسابات',
+    harness_offline: 'حالة محرك الفحص'
+  }
+  const grouped = new Map()
+  for (const event of events) {
+    if (!grouped.has(event.kind)) grouped.set(event.kind, [])
+    grouped.get(event.kind).push(event)
+  }
+  const payloadOf = (event) => { try { return JSON.parse(event.payload || '{}') } catch { return {} } }
+  const sections = []
+  for (const [kind, list] of grouped) {
+    const cap = 6
+    const rows = list.slice(0, cap).map((event) => {
+      const payload = payloadOf(event)
+      if (kind === 'new_doc' || kind === 'changed_doc') {
+        return `• ${event.account_key} — ${clipped(payload.doc_number || event.entity_id)}${payload.deadline ? ` — الموعد ${payload.deadline}` : ''}`
+      }
+      if (kind === 'deadline_reminder') {
+        return `• ${clipped(payload.title || payload.obligationId || '')} — يستحق خلال ${payload.days} يوم`
+      }
+      if (kind === 'account_parked') return `• ${event.account_key}`
+      if (kind === 'harness_offline') return '• المحرك لا يرسل نبضاً'
+      return `• ${event.account_key ? `${event.account_key}: ` : ''}${clipped(payload.title || payload.details || 'يتطلب الأمر انتباهك.')}`
+    })
+    const extra = list.length - rows.length
+    if (extra > 0) rows.push(`• و${extra} عناصر أخرى`)
+    sections.push(`${labels[kind] || kind}:\n${rows.join('\n')}`)
+  }
+  return `تحديثات SAPAuto — ${events.length} تنبيه\n\n${sections.join('\n\n')}`
+}
+
+async function flushWakeBacklog(events, providers, db = getDatabase()) {
+  const wake = wakeSettings(db)
+  if (!wake.enabled || !wake.externalId || !providers.whatsapp || messageMode(db) === 'live') return new Set()
+  const batchable = events.filter((event) => WAKE_BATCHABLE.has(event.kind))
+  if (batchable.length <= 4) return new Set()
+  await providers.whatsapp(wake.externalId, wakeGroupText(batchable).slice(0, 3500))
+  const timestamp = now()
+  const stamp = db.transaction(() => {
+    for (const event of batchable) {
+      db.prepare('INSERT INTO channel_deliveries(event_id,channel,external_id,sent_at,status) VALUES(?,?,?,?,?)')
+        .run(event.id, 'whatsapp', wake.externalId, timestamp, 'sent')
+      db.prepare('UPDATE events SET announced=1 WHERE id=?').run(event.id)
+    }
+  }).immediate()
+  return new Set(batchable.map((event) => event.id))
+}
+
 function eventText(event, payload) {
   if (event.kind === 'account_parked') return `تنبيه: تم إيقاف فحص الحساب ${event.account_key} مؤقتاً بعد تكرار الإخفاقات.`
   if (event.kind === 'harness_offline') return 'تنبيه: محرك SAPAuto لم يرسل نبضاً منذ أكثر من ثلاث دقائق.'
@@ -68,7 +140,7 @@ async function deliverEvent(event, providers, db = getDatabase()) {
     }
   }
   const text = await contentFor(event, payload, db)
-  const links = event.kind === 'report_requested'
+  let links = event.kind === 'report_requested'
     ? db.prepare(`SELECT c.channel,c.external_id FROM user_channels c
       JOIN users u ON u.id=c.user_id WHERE c.user_id=? AND c.channel=? AND u.disabled=0`)
       .all(payload.userId, payload.channel)
@@ -76,8 +148,19 @@ async function deliverEvent(event, providers, db = getDatabase()) {
       ? db.prepare(`SELECT c.channel,c.external_id FROM user_channels c
         JOIN users u ON u.id=c.user_id WHERE c.user_id=? AND c.channel=? AND u.disabled=0`)
         .all(payload.userId, payload.channel)
-    : db.prepare(`SELECT c.channel,c.external_id FROM user_channels c
-      JOIN users u ON u.id=c.user_id WHERE u.disabled=0 AND u.role IN ('Owner','Operator')`).all()
+      : db.prepare(`SELECT c.channel,c.external_id FROM user_channels c
+        JOIN users u ON u.id=c.user_id WHERE u.disabled=0 AND u.role IN ('Owner','Operator')`).all()
+  // A configured WhatsApp control number is an explicit wake channel. It does
+  // not grant access to every contact and is used only for operational events.
+  const wakeEnabled = db.prepare("SELECT value FROM settings WHERE key='whatsapp_wake_notifications'").get()?.value === 'true'
+  const controlNumber = db.prepare("SELECT value FROM settings WHERE key='whatsapp_control_number'").get()?.value || ''
+  const wakeKinds = new Set(['new_doc', 'changed_doc', 'deadline_reminder', 'reminder_due', 'assistant_attention', 'account_parked', 'harness_offline'])
+  if (wakeEnabled && controlNumber && wakeKinds.has(event.kind) && providers.whatsapp) {
+    const controlExternalId = `${controlNumber.replace(/^\+/, '')}@c.us`
+    if (!links.some((link) => link.channel === 'whatsapp' && link.external_id === controlExternalId)) {
+      links = [...links, { channel: 'whatsapp', external_id: controlExternalId }]
+    }
+  }
   let eligible = 0
   for (const link of links) {
     if (!providers[link.channel]) continue
@@ -88,10 +171,20 @@ async function deliverEvent(event, providers, db = getDatabase()) {
       .get(event.id, link.channel, link.external_id)
     if (exists) continue
     if (!text) throw new Error(`No message body for ${event.kind}`)
-    const mode = messageMode(db) === 'live' ? 'sent' : 'dry_run'
-    if (mode === 'sent') await providers[link.channel](link.external_id, text)
+    const isWakeTarget = link.channel === 'whatsapp' &&
+      link.external_id === `${controlNumber.replace(/^\+/, '')}@c.us` && wakeEnabled
+    const mode = isWakeTarget || messageMode(db) === 'live' ? 'sent' : 'dry_run'
+    let deliveryStatus = mode
+    if (mode === 'sent') {
+      try {
+        await providers[link.channel](link.external_id, text)
+      } catch (sendErr) {
+        console.error(`Delivery failed for event ${event.id} via ${link.channel}: ${sendErr.message}`)
+        deliveryStatus = 'failed'
+      }
+    }
     db.prepare('INSERT INTO channel_deliveries(event_id,channel,external_id,sent_at,status) VALUES(?,?,?,?,?)')
-      .run(event.id, link.channel, link.external_id, now(), mode)
+      .run(event.id, link.channel, link.external_id, now(), deliveryStatus)
   }
   if (eligible > 0) {
     db.prepare('UPDATE events SET announced=1 WHERE id=?').run(event.id)
@@ -160,10 +253,19 @@ function startEventDispatcher(providers, { db = getDatabase(), intervalMs = 1000
     try {
       checkHarnessOffline(db)
       enqueueDueReminders(db)
-      const events = db.prepare('SELECT * FROM events WHERE announced=0 ORDER BY created_at LIMIT 20').all()
-      for (const event of events) {
-        try { await deliverEvent(event, providers, db) }
-        catch (error) { console.error(`Event delivery failed (${event.id}): ${error.message}`) }
+      const events = db.prepare('SELECT * FROM events WHERE announced=0 ORDER BY created_at LIMIT 60').all()
+      if (events.length) {
+        // A day of offline scanning must never become dozens of WhatsApp
+        // bubbles: coalesce the operational backlog into one grouped digest
+        // before the usual per-event delivery runs.
+        let handled
+        try { handled = await flushWakeBacklog(events, providers, db) }
+        catch (error) { console.error(`Wake backlog delivery failed: ${error.message}`); handled = new Set() }
+        for (const event of events) {
+          if (handled?.has(event.id)) continue
+          try { await deliverEvent(event, providers, db) }
+          catch (error) { console.error(`Event delivery failed (${event.id}): ${error.message}`) }
+        }
       }
     } catch (error) {
       console.error(`Event dispatcher failed: ${error.message}`)

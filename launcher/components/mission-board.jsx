@@ -4,7 +4,7 @@ import Link from 'next/link'
 import useSWR from 'swr'
 import { useMemo, useState } from 'react'
 import {
-  Building2, CalendarClock, ClipboardList, CreditCard, Mail, Radio, ShieldAlert
+  Building2, CalendarClock, ClipboardList, CreditCard, Mail, Radio, ShieldAlert, Archive
 } from 'lucide-react'
 import { formatDateWith, numberLocaleFromCookie } from '../lib/digits-client.js'
 
@@ -69,6 +69,14 @@ export default function MissionBoard() {
       hint: `${number(counts.newToday)} منها اليوم`,
       icon: Mail,
       accent: 'var(--done)'
+    },
+    {
+      href: '/archive',
+      label: 'أرشيف الوثائق والمهل',
+      value: counts.archiveDocs || 0,
+      hint: counts.archiveExpired > 0 ? `${number(counts.archiveExpired)} منتهية 🚨` : (counts.archiveExpiringSoon > 0 ? `${number(counts.archiveExpiringSoon)} مهلة قريبة ⏳` : 'سجلات ومهل قانونية'),
+      icon: Archive,
+      accent: 'var(--accent)'
     }
   ]
 
@@ -242,9 +250,9 @@ function PriorityItem({ item }) {
       </div>
       <div className="priority-meta">
         {item.label && <span className="priority-pill">{item.label}</span>}
-        {item.updated_at && (
-          <time className="priority-time" dateTime={item.updated_at} title={formatDateWith(item.updated_at, { dateStyle: 'full', timeStyle: 'short' })}>
-            {relativeLabel(item.updated_at)}
+        {(item.due_at || item.updated_at) && (
+          <time className="priority-time" dateTime={item.due_at || item.updated_at} title={formatDateWith(item.due_at || item.updated_at, { dateStyle: 'full', timeStyle: 'short' })}>
+            {item.due_at ? `الموعد: ${formatDateWith(item.due_at, { dateStyle: 'medium' })}` : relativeLabel(item.updated_at)}
           </time>
         )}
         <Link className={`priority-cta ${item.companyId ? 'is-secondary' : ''}`} href={item.href || '/settings'}>

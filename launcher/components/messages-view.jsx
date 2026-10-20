@@ -86,6 +86,22 @@ export default function MessagesView({ rows }) {
                     {body || 'لم يتم تسجيل نص الرسالة في البيانات المستلمة.'}
                   </p>
 
+                  {message.ai_action_required && (
+                    <div style={{ margin: '8px 0 4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        padding: '3px 10px',
+                        borderRadius: '6px',
+                        background: message.ai_action_required.includes('عاجل') ? 'var(--overdue-soft)' : 'var(--info-soft)',
+                        color: message.ai_action_required.includes('عاجل') ? 'var(--overdue)' : 'var(--info)',
+                        border: `1px solid ${message.ai_action_required.includes('عاجل') ? 'var(--overdue-line)' : 'var(--info)'}`
+                      }}>
+                        ⚡ الإجراء المطلوب: {message.ai_action_required}
+                      </span>
+                    </div>
+                  )}
+
                   <footer className="message-card-footer">
                     <time dateTime={validIsoDate(message.observed_at) || undefined} title={formatDateWith(message.observed_at, { dateStyle: 'full', timeStyle: 'short' })}>
                       {relativeDate(message.observed_at)}

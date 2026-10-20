@@ -10,7 +10,7 @@ export const auth = betterAuth({
   database: db,
   secret: secret || 'development-only-secret-change-before-install-32chars',
   baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:3000',
-  trustedOrigins: (process.env.V8_TRUSTED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000')
+  trustedOrigins: (process.env.V8_TRUSTED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.111:3000,http://26.182.57.137:3000')
     .split(',').map((origin) => origin.trim()).filter(Boolean),
   emailAndPassword: {
     enabled: true,
@@ -30,7 +30,7 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 12,
     updateAge: 60 * 60
   },
-  account: { modelName: 'accounts' },
+  account: { modelName: 'user_accounts' },
   verification: { modelName: 'verification' },
   advanced: {
     useSecureCookies: process.env.NODE_ENV === 'production' &&

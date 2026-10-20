@@ -32,7 +32,8 @@ payments: `INSERT INTO payments(id,company_id,account_key,claim_number,amount,cu
       updated_at=excluded.updated_at`,
     messages: `INSERT INTO messages(id,company_id,account_key,portal_message_id,title,body,severity,received_at,is_read,raw_json,created_at)
       VALUES(@id,@company_id,@account_key,@portal_message_id,@title,@body,@severity,@received_at,@is_read,@raw_json,@created_at)
-      ON CONFLICT(account_key,portal_message_id) DO UPDATE SET title=excluded.title,body=excluded.body,
+      ON CONFLICT(account_key,portal_message_id) DO UPDATE SET title=excluded.title,
+      body=CASE WHEN excluded.body<>'' THEN excluded.body ELSE messages.body END,
       severity=excluded.severity,received_at=excluded.received_at,raw_json=excluded.raw_json`
   }[table]
   if (!insertSql) throw new Error(`Unsupported ingest table: ${table}`)
@@ -104,7 +105,7 @@ upsertRows(db, accountKey, companyId, 'payments', result.payments, 'claimNumber'
       }))
     upsertRows(db, accountKey, companyId, 'messages', result.messages, 'portalMessageId', (row, base) => ({
       ...base, portal_message_id: String(row.portalMessageId || row.id || ''),
-      title: String(row.title || row.subject || ''), body: String(row.body || row.message || ''),
+      title: String(row.title || row.subject || row.rawSummary || ''), body: String(row.body || row.message || ''),
         severity: String(row.severity || ''), received_at: row.receivedAt || row.date || null,
       is_read: row.isRead ? 1 : 0
     }))
@@ -141,6 +142,32 @@ upsertRows(db, accountKey, companyId, 'payments', result.payments, 'claimNumber'
     audit(db, { action: 'account.scan.completed', entityType: 'company', entityId: companyId, details: { accountKey, portalNameCaptured: Boolean(portalName) } })
   })
   transaction()
+  try {
+    const { syncPortalDocumentsToArchive, syncPortalTaskPdfsToArchive } = require('../domain/documents-archive.cjs')
+    syncPortalDocumentsToArchive(db)
+    syncPortalTaskPdfsToArchive(db)
+  } catch (err) {
+    console.warn(`[ingestAccount] Archive sync failed for ${accountKey}: ${err.message}`)
+  }
+  triggerLiveAiStudy(accountKey, db)
 }
 
-module.exports = { ingestAccount, stable }
+function triggerLiveAiStudy(accountKey, db = getDatabase(), limit = 3) {
+  if (!accountKey || typeof accountKey !== 'string') return
+  setImmediate(async () => {
+    try {
+      const { LiveAiAnalyst } = require('../assistant/live-analyst')
+      const analyst = new LiveAiAnalyst({ db })
+      await analyst.studyNewAccountEntities(accountKey, limit)
+    } catch (err) {
+      try {
+        const { defaultLogger } = require('./scraper/common/logger')
+        defaultLogger.warn(`[triggerLiveAiStudy] Background AI study failed for ${accountKey}: ${err.message}`)
+      } catch {
+        console.warn(`[triggerLiveAiStudy] Background AI study failed for ${accountKey}: ${err.message}`)
+      }
+    }
+  })
+}
+
+module.exports = { ingestAccount, stable, triggerLiveAiStudy }

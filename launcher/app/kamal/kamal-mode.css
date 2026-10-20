@@ -1,0 +1,168 @@
+/* Kamal Mode — V7-style dark theme with ambient light effects */
+
+.kamal-mode {
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
+  background-image:
+    linear-gradient(rgba(116, 171, 199, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(116, 171, 199, 0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-color: #0b0518;
+}
+
+.kamal-mode::before {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  background:
+    radial-gradient(circle at 13% 22%, rgba(125, 248, 255, 0.72) 0 1px, transparent 2px),
+    radial-gradient(circle at 42% 75%, rgba(151, 139, 255, 0.65) 0 1px, transparent 2px),
+    radial-gradient(circle at 77% 18%, rgba(113, 220, 255, 0.58) 0 1px, transparent 2px),
+    radial-gradient(circle at 89% 68%, rgba(223, 150, 255, 0.55) 0 1px, transparent 2px),
+    radial-gradient(ellipse at 18% 46%, rgba(18, 169, 200, 0.09), transparent 35%),
+    radial-gradient(ellipse at 84% 29%, rgba(124, 73, 215, 0.10), transparent 37%);
+  background-size: 340px 300px, 420px 360px, 510px 370px, 460px 420px, 100% 100%, 100% 100%;
+  content: '';
+  opacity: 0.54;
+  pointer-events: none;
+  animation: star-drift 42s linear infinite alternate;
+}
+
+.kamal-ambient {
+  position: fixed;
+  z-index: -1;
+  width: 460px;
+  height: 460px;
+  border: 1px solid rgba(81, 205, 223, 0.07);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: ambient-float 16s ease-in-out infinite alternate;
+}
+
+.kamal-ambient::before,
+.kamal-ambient::after {
+  position: absolute;
+  inset: 34px;
+  border: 1px solid rgba(81, 205, 223, 0.045);
+  border-radius: 50%;
+  content: '';
+}
+
+@keyframes star-drift {
+  0% { background-position: 0 0, 420px 360px, 510px 370px, 460px 420px, 0 0, 0 0; }
+  100% { background-position: 340px 300px, 0 0, 0 0, 0 0, 100% 100%, 100% 100%; }
+}
+
+@keyframes ambient-float {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  100% { transform: translate(20px, -15px) rotate(8deg); }
+}
+
+/* Override design system tokens for Kamal mode */
+.kamal-mode {
+  --canvas: #0b0518;
+  --canvas-alt: #120822;
+  --surface: #1a1028;
+  --surface-2: #251535;
+  --surface-3: #301a45;
+  --surface-inset: #140d20;
+  --border: #3d285c;
+  --border-soft: #2a1f40;
+  --border-strong: #5c3d8f;
+  --text: #f0e6ff;
+  --text-2: #d1c0e8;
+  --text-3: #a890c8;
+  --text-4: #7d6aa8;
+  --accent: #8b5cf6;
+  --accent-strong: #a78bfa;
+  --accent-ink: #0b0518;
+  --accent-soft: #241840;
+  --accent-line: #6d28d9;
+  --overdue: #f472b6;
+  --overdue-soft: #2d1628;
+  --overdue-line: #e11d48;
+  --soon: #fbbf24;
+  --soon-soft: #2d2a16;
+  --soon-line: #d97706;
+  --done: #4ade80;
+  --done-soft: #122014;
+  --done-line: #16a34a;
+  --neutral: #a78bfa;
+  --neutral-soft: #1f1a30;
+  --neutral-line: #3d2f5c;
+}
+
+/* Border beam effect for Cyber mode */
+.kamal-mode .panel,
+.kamal-mode .company-card,
+.kamal-mode .record-card,
+.kamal-mode .tax-kpi-card,
+.kamal-mode .payment-worklist-intro {
+  position: relative;
+  background: rgba(26, 16, 40, 0.8);
+  backdrop-filter: blur(12px);
+  border-color: rgba(125, 248, 255, 0.15);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.4), 
+    0 0 0 1px rgba(125, 248, 255, 0.05),
+    0 0 20px rgba(139, 92, 246, 0.3);
+  animation: border-beam 3s ease-in-out infinite;
+}
+
+@keyframes border-beam {
+  0%, 100% {
+    box-shadow: 
+      0 8px 32px rgba(0, 0, 0, 0.4), 
+      0 0 0 1px rgba(125, 248, 255, 0.05),
+      0 0 20px rgba(139, 92, 246, 0.3);
+  }
+  50% {
+    box-shadow: 
+      0 8px 32px rgba(0, 0, 0, 0.4), 
+      0 0 0 1px rgba(125, 248, 255, 0.15),
+      0 0 30px rgba(139, 92, 246, 0.5);
+  }
+}
+
+.kamal-mode .side-link.active {
+  background: rgba(139, 92, 246, 0.2);
+  color: #c4b5fd;
+}
+
+.kamal-mode .side-link.active svg {
+  color: #a78bfa;
+}
+
+.kamal-mode button.button-primary {
+  background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+}
+
+.kamal-mode button.button-primary:hover {
+  background: linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%);
+  box-shadow: 0 6px 24px rgba(139, 92, 246, 0.5);
+}
+
+/* Custom scrollbar for Cyber mode */
+.kamal-mode ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.kamal-mode ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.kamal-mode ::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.kamal-mode ::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-strong);
+}
+
+.kamal-mode ::-webkit-scrollbar-corner {
+  background: transparent;
+}

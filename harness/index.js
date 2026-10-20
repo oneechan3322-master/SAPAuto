@@ -8,10 +8,20 @@ const { startHeartbeat } = require('./heartbeat')
 const { startCommandWorker } = require('./commands')
 const { startSchedules } = require('./schedules')
 const { runLoop } = require('./loop')
+const { scanAndIngestAllPdfs } = require('../domain/pdf-scanner.cjs')
 
 async function main() {
   const db = getDatabase()
   runMigrations(db)
+
+  // Scan and ingest older and current PDFs with OCR into the database automatically
+  try {
+    const scanResult = await scanAndIngestAllPdfs({ db, importOlderVersions: true })
+    console.log(`[Harness Startup] PDF Scanner: Indexed ${scanResult.newlyIndexed} new, updated ${scanResult.updatedCount}, total ${scanResult.totalFound} PDFs.`)
+  } catch (err) {
+    console.error(`[Harness Startup] PDF Scanner warning: ${err.message}`)
+  }
+
   const controller = new AbortController()
   const stopHeartbeat = startHeartbeat(db)
   const stopCommands = startCommandWorker({ db })

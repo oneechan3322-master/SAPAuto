@@ -16,7 +16,7 @@ test('migrations apply once and create the planned tables', (t) => {
     fs.rmSync(directory, { recursive: true, force: true })
   })
 
-  assert.equal(runMigrations(db).length, 19)
+  assert.equal(runMigrations(db).length, 26)
   assert.deepEqual(runMigrations(db), [])
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
     .all().map((row) => row.name)

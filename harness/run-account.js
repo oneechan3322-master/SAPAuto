@@ -1,27 +1,38 @@
 'use strict'
 
-const fs = require('node:fs')
-const os = require('node:os')
-const path = require('node:path')
-const { randomUUID } = require('node:crypto')
-const { runLegacy } = require('./source')
+const { scanAccount } = require('./scraper')
 
-async function runAccount(accountKey) {
+/* The legacy bridge spawned an external subprocess with a hard kill timeout:
+   ['--account', accountKey, '--json-out', outputPath, '--no-email']
+   The native scanner runs in-process, but the cycle must stay bounded (RULE 6):
+   a scan that exceeds this limit is abandoned with an honest error and the
+   harness records the account failure like any other. */
+const DEFAULT_SCAN_TIMEOUT_MS = 15 * 60 * 1000
+
+async function runAccount(accountKey, options = {}) {
   if (typeof accountKey !== 'string' || !accountKey.trim()) throw new Error('Account key is required')
-  const outputPath = path.join(os.tmpdir(), `sapauto-v8-${randomUUID()}.json`)
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : DEFAULT_SCAN_TIMEOUT_MS
+  const scanner = options.scanAccount || scanAccount
+  let timer
   try {
-    await runLegacy(['--account', accountKey, '--json-out', outputPath, '--no-email'])
-    const result = JSON.parse(fs.readFileSync(outputPath, 'utf8'))
+    const result = await Promise.race([
+      scanner(accountKey),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`Account scan exceeded ${Math.round(timeoutMs / 1000)} seconds`))
+        }, timeoutMs)
+      })
+    ])
     for (const key of ['login', 'tasks', 'obligations', 'payments', 'messages', 'diffs']) {
-      if (!Object.hasOwn(result, key)) throw new Error(`SAPAuto3 result is missing ${key}`)
+      if (!Object.hasOwn(result, key)) throw new Error(`Scan result is missing ${key}`)
     }
     for (const key of ['tasks', 'obligations', 'payments', 'messages', 'diffs']) {
-      if (!Array.isArray(result[key])) throw new Error(`SAPAuto3 result ${key} must be an array`)
+      if (!Array.isArray(result[key])) throw new Error(`Scan result ${key} must be an array`)
     }
     return result
   } finally {
-    if (fs.existsSync(outputPath)) fs.rmSync(outputPath)
+    clearTimeout(timer)
   }
 }
 
-module.exports = { runAccount }
+module.exports = { DEFAULT_SCAN_TIMEOUT_MS, runAccount }

@@ -19,6 +19,9 @@ export default function DisplayControls() {
   useEffect(() => {
     const stored = document.documentElement.dataset.theme
     setTheme(stored === 'light' || stored === 'dark' ? stored : 'system')
+    if (!stored) {
+      document.body.classList.add('kamal-mode')
+    }
     const match = document.cookie.match(new RegExp(`${DIGITS_COOKIE}=(\\w+)`))
     setDigits(match?.[1] === 'arab' ? 'arab' : 'latn')
     setReady(true)
@@ -28,10 +31,12 @@ export default function DisplayControls() {
     setTheme(next)
     if (next === 'system') {
       delete document.documentElement.dataset.theme
+      document.body.classList.add('kamal-mode')
       try { localStorage.removeItem(THEME_KEY) } catch { /* ignore */ }
       return
     }
     document.documentElement.dataset.theme = next
+    document.body.classList.remove('kamal-mode')
     try { localStorage.setItem(THEME_KEY, next) } catch { /* ignore */ }
   }
 
@@ -41,7 +46,7 @@ export default function DisplayControls() {
   }
 
   const themes = [
-    ['system', 'النظام', Monitor],
+    ['system', 'Cyber', Monitor],
     ['light', 'فاتح', Sun],
     ['dark', 'داكن', Moon]
   ]

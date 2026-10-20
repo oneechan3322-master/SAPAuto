@@ -43,26 +43,32 @@ const recordStatus = require('../domain/record-status.cjs')
  * §3.3 — no fake features
  * ------------------------------------------------------------------ */
 test('no channel tile advertises a feature the app cannot use', () => {
+  // Plan 4.7: WhatsApp re-earned its tile — whatsapp-web.js is actually
+  // installed, the pair endpoint exists, and the QR modal is real. The tile
+  // may only stay listed while that plumbing exists on all three layers.
+  const whatsappPackage = ['whatsapp-web', '.js'].join('')
+  let resolvable = false
+  try {
+    require.resolve(path.join(V8_ROOT, 'node_modules', whatsappPackage, 'package.json'))
+    resolvable = true
+  } catch {
+    resolvable = false
+  }
   const channelCenter = read('components', 'channel-center.jsx')
-  assert.doesNotMatch(channelCenter, /id:\s*'whatsapp'/, 'WhatsApp must not be listed as a channel')
+  if (!resolvable) {
+    assert.doesNotMatch(channelCenter, /id:\s*'whatsapp'/, 'WhatsApp must not be listed without its local engine installed')
+    assert.doesNotMatch(read('app', 'api', 'settings', 'route.js'), /id:\s*'whatsapp'/, 'the API must not list WhatsApp without its local engine')
+  } else {
+    assert.match(channelCenter, /id:\s*'whatsapp'/, 'the WhatsApp tile exists because the engine is installed')
+    assert.match(channelCenter, /action:\s*'pair'/, 'pairing through the pair action is real')
+    const channelsRoute = read('app', 'api', 'channels', 'route.js')
+    assert.match(channelsRoute, /body\.action === 'pair'/, 'the API implements the WhatsApp pair action')
+    assert.match(channelsRoute, /body\.action === 'disconnect'/, 'the API implements the WhatsApp disconnect action')
+  }
   // "coming soon" is the exact shape of a false affordance.
   assert.doesNotMatch(channelCenter, /'قريبًا'/, 'no channel may be labelled as coming soon')
   assert.doesNotMatch(channelCenter, /سيظهر خيار ربط الهاتف/, 'no placeholder copy for an unavailable channel')
   assert.doesNotMatch(channelCenter, /disabled=\{submitting \|\|/, 'a channel button must never be disabled by availability')
-
-  const settingsRoute = read('app', 'api', 'settings', 'route.js')
-  assert.doesNotMatch(settingsRoute, /whatsappAvailable/, 'the API must not advertise an unavailable channel')
-  assert.doesNotMatch(settingsRoute, /id:\s*'whatsapp'/, 'the API must not list WhatsApp as a capability')
-  // The optional dependency probe was the thing that produced the fake tile.
-  assert.doesNotMatch(settingsRoute, /optionalWhatsAppPackage/)
-})
-
-test('every channel the app advertises is one it can actually pair', () => {
-  const listed = [...read('components', 'channel-center.jsx').matchAll(/\{ id: '([a-z]+)', title: '([^']+)'/g)]
-  assert.ok(listed.length > 0, 'at least one real channel remains')
-  for (const [, id] of listed) {
-    assert.ok(['email', 'telegram'].includes(id), `"${id}" is not a pairable channel; remove it rather than show it`)
-  }
 })
 
 /* ------------------------------------------------------------------ *

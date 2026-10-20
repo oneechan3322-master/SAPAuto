@@ -29,7 +29,7 @@ export async function POST(request) {
   if (body.type === 'scan_now' && body.payload?.account) {
     const accounts = await listAccounts()
     const account = accounts.find((item) => item.username.toLowerCase() === body.payload.account.toLowerCase())
-    if (!account) return Response.json({ error: 'That scan account is not configured in SAPAuto3.' }, { status: 404 })
+    if (!account) return Response.json({ error: 'That scan account is not configured in V8.' }, { status: 404 })
     body.payload.account = account.username
   }
   const commandId = createCommand(body.type, body.payload || {}, authz.session.user.id, db)

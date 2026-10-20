@@ -70,13 +70,14 @@ function presentAttention(item, index, locale = 'ar-EG-u-nu-latn') {
     ? db.prepare(`SELECT id,name,account_key,name_source,english_name,portal_name FROM companies WHERE account_key=?`).get(item.account_key)
     : null
   const resolvedCompany = company ? identity.resolveCompanyIdentity(company) : null
-  const companyName = resolvedCompany?.name || (item.account_key ? identity.UNREGISTERED_COMPANY_NAME : '')
+  let companyName = resolvedCompany?.name || (item.account_key ? identity.UNREGISTERED_COMPANY_NAME : '')
   let type = 'general'
   let title = 'هناك أمر يحتاج إلى مراجعتك'
   let details = ''
   let href = '/settings'
   let urgent = false
   let label = 'للمراجعة'
+  let dueAt = ''
 
   if (item.category === 'payment_overdue' || item.category === 'payment_due' ||
       item.category === 'payment_status_unknown') {
@@ -89,6 +90,7 @@ function presentAttention(item, index, locale = 'ar-EG-u-nu-latn') {
     label = urgent ? 'عاجل' : item.category === 'payment_due' ? 'قريبًا' : 'تحقق'
     const payment = db.prepare('SELECT amount,currency,due_date,status FROM payments WHERE id=?').get(item.entity_id)
     if (payment) {
+      dueAt = payment.due_date || ''
       const amount = formatAmount(payment.amount, payment.currency)
       const dueDate = formatDate(payment.due_date, locale)
       details = [
@@ -107,6 +109,7 @@ function presentAttention(item, index, locale = 'ar-EG-u-nu-latn') {
     label = urgent ? 'عاجل' : 'قريبًا'
     const obligation = db.prepare('SELECT title,deadline FROM obligations WHERE id=?').get(item.entity_id)
     if (obligation) {
+      dueAt = obligation.deadline || ''
       const titleText = cleanTitle(obligation.title)
       const dueDate = formatDate(obligation.deadline, locale)
       details = [titleText, dueDate && `الموعد ${dueDate}`].filter(Boolean).join(' · ')
@@ -118,6 +121,7 @@ function presentAttention(item, index, locale = 'ar-EG-u-nu-latn') {
     label = 'تحقق'
     const obligation = db.prepare('SELECT title,deadline FROM obligations WHERE id=?').get(item.entity_id)
     if (obligation) {
+      dueAt = obligation.deadline || ''
       const titleText = cleanTitle(obligation.title)
       const dueDate = formatDate(obligation.deadline, locale)
       details = [titleText, 'الحالة غير معروفة في المصدر', dueDate && `الموعد ${dueDate}`].filter(Boolean).join(' · ')
@@ -129,15 +133,18 @@ function presentAttention(item, index, locale = 'ar-EG-u-nu-latn') {
     label = 'قريبًا'
     const task = db.prepare('SELECT title,deadline FROM tasks WHERE id=?').get(item.entity_id)
     if (task) {
+      dueAt = task.deadline || ''
       const titleText = cleanTitle(task.title)
       const dueDate = formatDate(task.deadline, locale)
       details = [titleText, dueDate && `الموعد ${dueDate}`].filter(Boolean).join(' · ')
     }
   } else if (item.category === 'account_failure') {
     type = 'failure'
-    title = 'تعذرت مراجعة إحدى شركاتك'
+    const accountLabel = item.account_key || 'حساب غير معروف'
+    title = `تعذرت مراجعة الحساب ${accountLabel}`
     href = '/failures'
-    details = 'تحقق من الاتصال والإعدادات في مركز التحكم.'
+    details = explainAccountFailure(item.details)
+    if (!company) companyName = `الحساب: ${accountLabel}`
     urgent = true
     label = 'عاجل'
   } else if (item.category === 'harness_offline') {
@@ -154,6 +161,7 @@ function presentAttention(item, index, locale = 'ar-EG-u-nu-latn') {
     details,
     companyName,
     updated_at: item.updated_at,
+    due_at: dueAt,
     href,
     tone: urgent ? 'urgent' : 'attention',
     label,
@@ -161,6 +169,17 @@ function presentAttention(item, index, locale = 'ar-EG-u-nu-latn') {
     companyKnown: Boolean(resolvedCompany?.known),
     companyEnglishName: resolvedCompany?.englishName || ''
   }
+}
+
+function explainAccountFailure(reason) {
+  const text = String(reason || '').toLowerCase()
+  if (text.includes('authentication') || text.includes('rejected account')) {
+    return 'رفضت البوابة تسجيل الدخول. راجع كلمة المرور أو صلاحية الحساب قبل إعادة الفحص.'
+  }
+  if (text.includes('timeout') || text.includes('unreachable')) {
+    return 'لم تستجب البوابة أثناء تسجيل الدخول. أعد الفحص لاحقًا وتحقق من اتصال البوابة.'
+  }
+  return 'توجد مشكلة في آخر فحص لهذا الحساب. افتح الإخفاقات لرؤية التفاصيل المسجلة.'
 }
 
 function eventTitle(kind) {

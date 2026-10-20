@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { AlertTriangle, ChevronDown, ChevronUp, Filter } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Filter } from 'lucide-react'
 import recordStatus from '../../domain/record-status.cjs'
 import CopyCompanyName from './copy-company-name.jsx'
 import SyncMeta from './sync-meta.jsx'
@@ -21,17 +21,36 @@ const { formatAmount, describePayment } = recordStatus
  */
 
 const LANE_FILTERS = [
-  { id: 'all', label: 'الكل' },
-  { id: 'needs_attention', label: 'تحتاج انتباهك' },
+  { id: 'review_now', label: 'للمراجعة الآن' },
+  { id: 'historical', label: 'سجل تاريخي' },
+  { id: 'all', label: 'كل السجلات' },
   { id: 'conflict', label: 'تعارض' },
   { id: 'stale', label: 'بيانات قديمة' },
   { id: 'source_complete', label: 'مسدّدة في المصدر' },
   { id: 'source_active', label: 'مستحقة في المصدر' }
 ]
 
-function matchesFilter(payment, filter) {
+function dueKey(row) {
+  return typeof row.due_date === 'string' ? row.due_date.slice(0, 10) : ''
+}
+
+function isHistorical(row) {
+  const date = dueKey(row)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
+  const currentYear = new Date().getFullYear()
+  return date < `${currentYear - 1}-01-01`
+}
+
+function needsReviewNow(row, payment) {
+  if (isHistorical(row)) return false
+  return payment.source.disposition === 'active' || payment.source.disposition === 'unknown' || payment.conflict || payment.stale
+}
+
+function matchesFilter(row, payment, filter) {
   if (filter === 'all') return true
-  if (filter === 'needs_attention') return payment.conflict || payment.stale || payment.source.disposition !== 'active'
+  if (filter === 'review_now') return needsReviewNow(row, payment)
+  if (filter === 'historical') return isHistorical(row)
+  if (filter === 'needs_attention') return needsReviewNow(row, payment)
   if (filter === 'conflict') return payment.conflict
   if (filter === 'stale') return payment.stale
   if (filter === 'source_complete') return payment.source.disposition === 'complete'
@@ -48,14 +67,60 @@ export default function PaymentWorklist({ rows, locale = 'ar-EG-u-nu-latn', trun
     [rows]
   )
   const counts = useMemo(() => LANE_FILTERS.reduce((acc, lane) => {
-    acc[lane.id] = described.filter(({ payment }) => matchesFilter(payment, lane.id)).length
+    acc[lane.id] = described.filter(({ row, payment }) => matchesFilter(row, payment, lane.id)).length
     return acc
   }, {}), [described])
-  const visible = described.filter(({ payment }) => matchesFilter(payment, filter))
+
+  const financialMetrics = useMemo(() => {
+    let reviewNow = 0
+    let historical = 0
+    let complete = 0
+    let unknown = 0
+
+    described.forEach(({ row, payment }) => {
+      if (isHistorical(row)) historical++
+      if (needsReviewNow(row, payment)) reviewNow++
+      if (payment.source.disposition === 'complete') complete++
+      if (payment.source.disposition === 'unknown') unknown++
+    })
+
+    return { reviewNow, historical, complete, unknown }
+  }, [described])
+
+  const visible = described.filter(({ row, payment }) => matchesFilter(row, payment, filter))
 
   return (
     <section className="payment-worklist" aria-labelledby="payment-worklist-title">
       <h2 id="payment-worklist-title" className="visually-hidden">قائمة المدفوعات</h2>
+
+      <div className="payment-worklist-intro">
+        <div>
+          <span className="payment-worklist-kicker">قائمة مراجعة المدفوعات</span>
+          <h2>ابدأ بالسجلات الحالية، ثم راجع التاريخية عند الحاجة</h2>
+          <p>لا نعرض مجموعًا ماليًا كأنه دين مؤكد. حالة البوابة هي المرجع، والسجلات القديمة تبقى منفصلة للمراجعة.</p>
+        </div>
+      </div>
+
+      <div className="payment-kpi-grid">
+        <div className="tax-kpi-card">
+          <div className="tax-kpi-icon icon-teal">✓</div>
+          <div className="tax-kpi-label">للمراجعة الآن</div>
+          <strong className="tax-kpi-value">{financialMetrics.reviewNow.toLocaleString(locale)}</strong>
+          <span className="tax-kpi-hint">سجلات من السنة الحالية والسابقة</span>
+        </div>
+        <div className="tax-kpi-card">
+          <div className="tax-kpi-icon icon-amber">⌛</div>
+          <div className="tax-kpi-label">سجل تاريخي</div>
+          <strong className="tax-kpi-value">{financialMetrics.historical.toLocaleString(locale)}</strong>
+          <span className="tax-kpi-hint">قبل السنة السابقة — لا يدخل في ملخص العمل</span>
+        </div>
+        <div className="tax-kpi-card">
+          <div className="tax-kpi-icon icon-green">✓</div>
+          <div className="tax-kpi-label">حالتها غير محددة</div>
+          <strong className="tax-kpi-value">{financialMetrics.unknown.toLocaleString(locale)}</strong>
+          <span className="tax-kpi-hint">تحتاج التحقق من المصدر</span>
+        </div>
+      </div>
 
       <div className="worklist-toolbar">
         <span className="worklist-count">
@@ -116,27 +181,36 @@ export default function PaymentWorklist({ rows, locale = 'ar-EG-u-nu-latn', trun
               {visible.map(({ row, payment }) => {
                 const open = expanded === row.id
                 return [
-                  <tr key={row.id} className={payment.conflict ? 'worklist-row is-conflict' : 'worklist-row'}>
-                    <th scope="row" className="worklist-company">
+                  <tr key={row.id} className={`${payment.conflict ? 'worklist-row is-conflict' : 'worklist-row'}${isHistorical(row) ? ' is-historical' : ''}`}>
+                    <th scope="row" className="worklist-company" data-label="الشركة والمطالبة">
                       <span className="worklist-company-name company-name-full" title={row.company_name || ''}>
                         {row.company_name || 'غير معروفة'}
                       </span>
-                      {row.company_english_name && (
-                        <span className="worklist-company-english company-name-full" dir="ltr" title={row.company_english_name}>
-                          {row.company_english_name}
-                        </span>
-                      )}
                       {row.claim_number && (
-                        <span className="worklist-claim" dir="ltr">claim {row.claim_number}</span>
+                        <div className="worklist-claim-row" dir="ltr">
+                          <span className="worklist-claim">مطالبة #{row.claim_number}</span>
+                          <button
+                            type="button"
+                            className="text-slate-400 hover:text-teal-600 transition-colors p-0.5 rounded cursor-pointer"
+                            title="نسخ رقم المطالبة"
+                            aria-label="نسخ رقم المطالبة"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigator.clipboard.writeText(String(row.claim_number))
+                            }}
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
                       )}
                     </th>
-                    <td className="worklist-amount">{formatAmount(row.amount, row.currency)}</td>
-                    <td className="worklist-date">
+                    <td className="worklist-amount" data-label="المبلغ">{formatAmount(row.amount, row.currency)}</td>
+                    <td className="worklist-date" data-label="موعد السداد">
                       {row.due_date
                         ? <time dateTime={String(row.due_date).slice(0, 10)}>{String(row.due_date).slice(0, 10)}</time>
                         : <span className="worklist-unknown">غير مسجّل</span>}
                     </td>
-                    <td>
+                    <td data-label="حالة البوابة">
                       <span className={`worklist-lane ${payment.source.tone}`}>
                         {payment.source.disposition === 'unknown' && <AlertTriangle size={12} aria-hidden="true" />}
                         {payment.source.label}
@@ -145,13 +219,13 @@ export default function PaymentWorklist({ rows, locale = 'ar-EG-u-nu-latn', trun
                         <span className="worklist-lane-raw" dir="ltr">{payment.source.raw}</span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="المراجعة المحلية">
                       <span className={`worklist-lane ${payment.local.tone}`}>{payment.local.label}</span>
                     </td>
-                    <td className="worklist-sync">
+                    <td className="worklist-sync" data-label="آخر مزامنة">
                       <SyncMeta value={row.company_last_synced_at} state={row.last_scan_state} locale={locale} />
                     </td>
-                    <td>
+                    <td className="worklist-actions">
                       <button
                         type="button"
                         className="worklist-expand"

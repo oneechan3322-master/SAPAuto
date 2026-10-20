@@ -2,19 +2,20 @@
 
 const assert = require('node:assert/strict')
 const test = require('node:test')
-const { parseCliArguments } = require('../../SAPAuto3/src/orchestrator')
+const { parseCliArguments } = require('../harness/scraper/cli')
 
-test('SAPAuto3 JSON scan options select one account and disable email', () => {
+test('V8 scraper CLI accepts a single-account scan with an output path', () => {
   assert.deepEqual(parseCliArguments([
-    '--account', 'acct-1', '--json-out', 'C:\\temp\\scan.json', '--no-email'
+    '--account', 'acct-1', '--json-out', 'C:\\temp\\scan.json'
   ]), {
-    listAccounts: false,
     accountKey: 'acct-1',
     jsonOutFile: 'C:\\temp\\scan.json'
   })
 })
 
-test('SAPAuto3 account-list mode cannot be mixed with a scan', () => {
-  assert.throws(() => parseCliArguments(['--list-accounts', '--account', 'acct-1']))
+test('V8 scraper CLI rejects incomplete or contradictory arguments', () => {
   assert.throws(() => parseCliArguments(['--account']))
+  assert.throws(() => parseCliArguments(['--account', 'acct-1']))
+  assert.throws(() => parseCliArguments(['--json-out', 'out.json']))
+  assert.throws(() => parseCliArguments(['--account', 'a', '--account', 'b', '--json-out', 'o.json']))
 })

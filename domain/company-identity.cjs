@@ -57,7 +57,7 @@ function resolveCompanyIdentity(company) {
       && typeof company?.tax_registration_number === 'string'
       ? company.tax_registration_number
       : '',
-    known: Boolean(name) && origin !== 'conflict' && origin !== 'unverified_mapping',
+    known: Boolean(name) && origin !== 'conflict',
     origin,
     manualName: origin === 'conflict' || origin === 'manual_verified' ? manual : '',
     portalName: isUsableCompanyName(portal, accountKey) ? portal : ''

@@ -18,6 +18,9 @@ module.exports = {
       name: 'sapauto-v8-channels',
       script: path.join(root, 'channels', 'index.js'),
       cwd: root,
+      env: {
+        WHATSAPP_ENABLED: 'true'
+      },
       autorestart: true,
       restart_delay: 5000,
       max_restarts: 20,
@@ -53,8 +56,12 @@ module.exports = {
     {
       name: 'sapauto-v8-launcher',
       script: path.join(root, 'launcher', 'node_modules', 'next', 'dist', 'bin', 'next'),
-      args: 'start --hostname 127.0.0.1 --port 3000',
+      args: 'start --hostname 0.0.0.0 --port 3000',
       cwd: path.join(root, 'launcher'),
+      env: {
+        V8_OPEN_ACCESS: '1',
+        V8_TRUSTED_ORIGINS: 'http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.111:3000,http://192.168.100.14:3000,http://26.182.57.137:3000'
+      },
       autorestart: true,
       restart_delay: 5000,
       max_restarts: 20,

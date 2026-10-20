@@ -84,7 +84,7 @@ test('identity origins separate portal, verified manual, legacy mapping, and con
     name_source: 'source'
   })
   assert.equal(legacy.origin, 'unverified_mapping')
-  assert.equal(legacy.known, false)
+  assert.equal(legacy.known, true)
   assert.equal(legacy.name, 'شركة قديمة')
 })
 

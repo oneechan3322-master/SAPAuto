@@ -5,7 +5,27 @@ node_modules/
 !.env.example
 data/*.db
 data/*.db-*
+data/*.key
 data/pdfs/*
 data/backups/*
+data/obligations.json
+data/payments.json
+data/messages.json
+data/company-registry.json
 channels/.wwebjs_auth/
 channels/.wwebjs_cache/
+
+# WhatsApp session & caches (any location)
+.wwebjs_cache/
+channels/.wwebjs_auth*/
+
+# Python
+__pycache__/
+*.pyc
+
+# Client data — never in version control (Opus5.5 privacy rule)
+data/diag-payroll/
+data/*.csv
+data/atomic-contract-*.json
+data/payroll.json
+data/tasks.json

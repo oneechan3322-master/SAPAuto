@@ -4,7 +4,7 @@
    ========================================================================== */
 
 /* ---------- Display preferences (theme + digits) ---------- */
-.display-controls { display: grid; gap: var(--s-1); margin-top: var(--s-3); }
+.display-controls { display: grid; gap: var(--s-1); margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--border-soft); }
 .display-controls-row { display: flex; align-items: center; gap: var(--s-1); }
 .display-chip {
   display: inline-flex;
@@ -31,6 +31,13 @@
   font-weight: 600;
   letter-spacing: .04em;
 }
+
+.sidebar.is-collapsed .display-controls { width: 100%; }
+.sidebar.is-collapsed .display-caption,
+.sidebar.is-collapsed .display-controls-row:last-child { display: none; }
+.sidebar.is-collapsed .display-controls-row { flex-direction: column; justify-content: center; }
+.sidebar.is-collapsed .display-chip { width: 30px; min-width: 0; flex: 0 0 30px; padding: 0; font-size: 0; }
+.sidebar.is-collapsed .display-chip svg { width: 15px; height: 15px; }
 
 /* ---------- Home: clickable summary strip + prioritized items ---------- */
 .dashboard { display: grid; gap: var(--s-5); }
@@ -259,6 +266,16 @@
 .summary-chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--chip-accent, var(--accent)); }
 .summary-chip strong { color: var(--text-2); font-weight: 700; }
 .summary-sep { color: var(--text-4); }
+.company-card-next-date {
+  margin: var(--s-3) 0 0;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--t-2xs);
+  line-height: 1.7;
+}
+.company-card-next-date strong { color: var(--text-1); }
 .company-origin-note { color: var(--text-4); font-size: var(--t-2xs); }
 .company-card-footer {
   display: flex;
@@ -576,6 +593,8 @@
 .channel-card-luxe:hover { border-color: var(--border-strong); }
 .channel-card-luxe.is-connected { border-color: var(--done-line); }
 .channel-brand { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: var(--r-sm); color: var(--text-2); background: var(--surface-3); }
+.channel-brand-whatsapp { color: #128c7e; background: var(--done-soft); }
+.channel-brand-whatsapp svg { width: 22px; height: 22px; }
 .channel-card-title-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
 .channel-connection { color: var(--text-3); font-size: var(--t-2xs); white-space: nowrap; }
 .channel-connection.connected { color: var(--done); font-weight: 700; }
@@ -584,7 +603,7 @@
 .channel-connect-button:hover { border-color: var(--border-soft); color: var(--accent-strong); background: transparent; }
 .channel-inline-note { color: var(--soon); font-size: var(--t-xs); }
 .whatsapp-pair { display: grid; justify-items: start; gap: var(--s-2); color: var(--text-2); font-size: var(--t-xs); }
-.whatsapp-pair img { width: 144px; height: 144px; padding: var(--s-2); border-radius: var(--r-sm); background: #fff; }
+.whatsapp-pair img { width: 144px; height: 144px; padding: var(--s-2); border-radius: var(--r-sm); background: var(--surface); }
 .delivery-preference { display: flex; align-items: center; justify-content: space-between; gap: var(--s-5); padding-top: var(--s-4); border-top: 1px solid var(--border-soft); }
 .delivery-copy { display: grid; gap: var(--s-1); }
 .delivery-kicker { color: var(--accent); font-size: var(--t-2xs); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
@@ -604,17 +623,46 @@
 
 .channel-switch, .setting-switch {
   position: relative;
-  width: 46px;
-  min-height: 26px;
-  height: 26px;
-  flex: 0 0 46px;
+  width: 44px;
+  min-height: 24px;
+  height: 24px;
+  flex: 0 0 44px;
   padding: 2px;
   border-radius: var(--r-full);
   background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  /* A knob mid-travel must never paint outside the capsule: the pill clips it. */
+  overflow: hidden;
+  transition: background .2s var(--ease), border-color .2s var(--ease);
 }
-.channel-switch span, .setting-switch span { display: block; width: 20px; height: 20px; border-radius: 50%; background: var(--text-4); transition: transform .16s var(--ease), background .16s var(--ease); }
-.channel-switch.is-on, .setting-switch.is-on { border-color: var(--accent-line); background: var(--accent-soft); }
-.channel-switch.is-on span, .setting-switch.is-on span { background: var(--accent); transform: translateX(-20px); }
+.channel-switch span, .setting-switch span {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface-inset);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .35);
+  transition: transform .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
+}
+.channel-switch.is-on, .setting-switch.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+/* Travel = knob width (100%) + the 2px start padding, expressed logically so a
+   knob resize cannot silently reintroduce the RTL overflow from plan 4.1 §1. */
+.channel-switch.is-on span, .setting-switch.is-on span {
+  background: var(--accent-ink);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .25);
+  transform: translateX(calc(-100% - 2px));
+}
+[dir="rtl"] .channel-switch.is-on span, [dir="rtl"] .setting-switch.is-on span {
+  transform: translateX(calc(-100% - 2px));
+}
 
 /* ---------- Capability center (plan 2.0 §3.2) ---------- */
 .capability-center { display: grid; gap: var(--s-3); }
@@ -719,6 +767,9 @@
 .state-pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .state-good { color: var(--done); }
 .state-muted { color: var(--text-3); }
+/* Cycle-state tones (plan 4.1 §3): amber while scanning, rose on failure. */
+.state-busy { color: var(--soon); }
+.state-bad { color: var(--overdue); }
 .settings-section { display: grid; gap: var(--s-4); padding: var(--s-5); }
 .section-heading { display: flex; align-items: flex-start; gap: var(--s-3); padding-bottom: var(--s-3); border-bottom: 1px solid var(--border-soft); }
 .section-index { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: var(--r-sm); color: var(--accent); background: var(--accent-soft); font-family: var(--font-mono); font-size: var(--t-2xs); font-weight: 700; }
@@ -815,6 +866,7 @@
     -webkit-backdrop-filter: blur(18px) saturate(160%);
   }
   .brand, .nav-caption, .sidebar-footer, .side-nav { display: none; }
+  .sidebar-collapse-button, .display-controls { display: none; }
   .mobile-bottom-nav { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 2px; }
   .mobile-bottom-nav .side-link {
     min-width: 0;

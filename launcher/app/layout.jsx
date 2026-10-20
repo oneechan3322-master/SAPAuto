@@ -1,5 +1,6 @@
 import { Cairo, IBM_Plex_Sans_Arabic } from 'next/font/google'
 import './globals.css'
+import './kamal/kamal-mode.css'
 import PwaRegister from '../components/pwa-register.jsx'
 
 const plex = IBM_Plex_Sans_Arabic({
@@ -24,7 +25,7 @@ export const metadata = {
 }
 
 /** Applies the saved theme before first paint so the page never flashes. */
-const themeBoot = `try{var t=localStorage.getItem('sapauto.theme');if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t}}catch(e){}`
+const themeBoot = `try{var t=localStorage.getItem('sapauto.theme');if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t;document.body.classList.remove('kamal-mode')}else{document.body.classList.add('kamal-mode')}}catch(e){}`
 
 export default function RootLayout({ children }) {
   return (

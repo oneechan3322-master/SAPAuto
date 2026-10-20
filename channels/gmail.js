@@ -6,7 +6,7 @@ const nodemailer = require('nodemailer')
 const { getDatabase } = require('../db/connect')
 const { runAssistant } = require('../assistant/run')
 const { boundedText } = require('../domain/bounded-text.cjs')
-const { consumeLinkCode, linkedUser, allowUnlinkedReply } = require('./link-codes')
+const { consumeLinkCode, linkedUser } = require('./link-codes')
 
 function smtpTransport() {
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) throw new Error('GMAIL_USER and GMAIL_APP_PASSWORD are required')
@@ -20,16 +20,66 @@ function smtpTransport() {
   })
 }
 
-async function sendGmail(to, text) {
+async function sendGmail(to, text, subject = 'SAPAuto V8') {
+  if (!to || typeof to !== 'string') throw new Error('sendGmail: recipient is required')
+  if (!text || typeof text !== 'string') throw new Error('sendGmail: text body is required')
   const transport = smtpTransport()
-  await transport.sendMail({
+  const result = await transport.sendMail({
     from: process.env.GMAIL_USER,
     to,
-    subject: 'SAPAuto V8',
+    subject: String(subject).slice(0, 200),
     text,
     disableFileAccess: true,
     disableUrlAccess: true
   })
+  return result
+}
+
+/**
+ * Send a local PDF file as an email attachment.
+ * Privacy orbit: the file must reside within v8/data.
+ *
+ * @param {string} to - Recipient email address
+ * @param {string} filePath - Absolute path to the PDF file (must be inside data root)
+ * @param {object} [opts]
+ * @param {string} [opts.subject] - Email subject line
+ * @param {string} [opts.body]    - Email body text
+ * @param {string} [opts.filename] - Display filename for the attachment
+ * @returns {Promise<object>} nodemailer send result
+ */
+async function sendGmailDocument(to, filePath, { subject = 'SAPAuto V8 — مستند رسمي', body = '', filename = '' } = {}) {
+  if (!to || typeof to !== 'string') throw new Error('sendGmailDocument: recipient is required')
+  if (!filePath || typeof filePath !== 'string') throw new Error('sendGmailDocument: filePath is required')
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const resolved = path.resolve(filePath)
+  const { localDataRoot } = require('./secure-store')
+  const root = path.resolve(localDataRoot())
+  const resolvedCmp = process.platform === 'win32' ? resolved.toLowerCase() : resolved
+  const rootCmp = process.platform === 'win32' ? root.toLowerCase() : root
+  if (!resolvedCmp.startsWith(rootCmp + path.sep) && resolvedCmp !== rootCmp) {
+    throw new Error(`sendGmailDocument: file outside allowed data root: ${resolved}`)
+  }
+  if (!fs.existsSync(resolved)) throw new Error(`sendGmailDocument: file not found: ${resolved}`)
+  const attachFilename = filename
+    ? (filename.toLowerCase().endsWith('.pdf') ? filename : `${filename}.pdf`)
+    : path.basename(resolved)
+  const transport = smtpTransport()
+  const result = await transport.sendMail({
+    from: process.env.GMAIL_USER,
+    to,
+    subject: String(subject).slice(0, 200),
+    text: body || subject,
+    attachments: [
+      {
+        filename: attachFilename,
+        path: resolved,
+        contentType: 'application/pdf'
+      }
+    ],
+    disableUrlAccess: true
+  })
+  return result
 }
 
 async function processMail(message, db = getDatabase()) {
@@ -45,7 +95,8 @@ async function processMail(message, db = getDatabase()) {
   }
   const user = linkedUser('email', sender, db)
   if (!user || user.disabled) {
-    if (allowUnlinkedReply('email', sender, db)) await sendGmail(sender, 'اطلب من مالك SAPAuto رمز ربط قبل إرسال الطلبات.')
+    // Unknown inbox senders are deliberately silent. A mailbox must not become
+    // an automatic responder until its sender has explicitly linked it.
     return
   }
   const result = await runAssistant({ userId: user.userId, role: user.role, text })
@@ -89,4 +140,4 @@ function startGmailPoller({ intervalMs = 120000, db = getDatabase() } = {}) {
   return () => clearInterval(timer)
 }
 
-module.exports = { sendGmail, processMail, pollMailboxOnce, startGmailPoller }
+module.exports = { sendGmail, sendGmailDocument, processMail, pollMailboxOnce, startGmailPoller }

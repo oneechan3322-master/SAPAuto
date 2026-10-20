@@ -17,7 +17,7 @@ function configured(channel) {
   if (channel === 'telegram') {
     return secureStore.hasStoredCredentials('telegram') || Boolean(process.env.TELEGRAM_BOT_TOKEN)
   }
-  return process.env.WHATSAPP_ENABLED === 'true'
+  return getDatabase().prepare("SELECT value FROM settings WHERE key='whatsapp_connected'").get()?.value === 'true'
 }
 
 function channelState() {
@@ -30,9 +30,12 @@ function channelState() {
     if (error.code !== 'MODULE_NOT_FOUND') throw error
   }
   const qr = db.prepare("SELECT value FROM settings WHERE key='whatsapp_qr'").get()?.value || ''
-  const paired = db.prepare("SELECT value FROM settings WHERE key='whatsapp_connected'").get()?.value === 'true' ||
-    process.env.WHATSAPP_ENABLED === 'true'
+  const pairingCode = db.prepare("SELECT value FROM settings WHERE key='whatsapp_pair_code'").get()?.value || ''
+  // A package, an environment flag, or an old browser profile is not proof of a
+  // connected WhatsApp session. Only the client's `ready` event may set this.
+  const paired = db.prepare("SELECT value FROM settings WHERE key='whatsapp_connected'").get()?.value === 'true'
   const pairingRequested = db.prepare("SELECT value FROM settings WHERE key='whatsapp_pair_requested'").get()?.value === 'true'
+  const controlNumber = db.prepare("SELECT value FROM settings WHERE key='whatsapp_control_number'").get()?.value || ''
   const linkedRecipients = db.prepare(`SELECT COUNT(*) AS n FROM user_channels c
     JOIN users u ON u.id=c.user_id WHERE u.disabled=0 AND c.verified_at IS NOT NULL`).get().n
   const providersReady = ['gmail', 'telegram'].some(configured) || configured('whatsapp')
@@ -42,7 +45,7 @@ function channelState() {
       telegram: configured('telegram'),
       whatsapp: paired || configured('whatsapp')
     },
-    whatsapp: { paired, pairingRequested, qr, available: whatsappAvailable },
+    whatsapp: { paired, pairingRequested, qr, pairingCode, controlNumber, available: whatsappAvailable },
     linkedRecipients,
     liveDeliveryReady: providersReady && linkedRecipients > 0
   }
@@ -142,6 +145,35 @@ export async function POST(request) {
       audit(db, {
         actorId: authz.session.user.id,
         action: 'channel.pairing_requested',
+        entityType: 'channel',
+        entityId: 'whatsapp'
+      })
+      return Response.json({ saved: true, state: channelState() })
+    }
+
+    if (body.channel === 'whatsapp' && body.action === 'save_control_number') {
+      const controlNumber = typeof body.controlNumber === 'string' ? body.controlNumber.trim() : ''
+      if (!/^\+?[1-9]\d{7,14}$/.test(controlNumber)) {
+        return Response.json({ error: 'أدخل رقم واتساب بصيغة دولية صحيحة.' }, { status: 400 })
+      }
+      const normalized = `+${controlNumber.replace(/^\+/, '')}`
+      const db = getDatabase()
+      db.prepare(`INSERT INTO settings(key,value,updated_at) VALUES('whatsapp_control_number',?,?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`).run(normalized, now())
+      audit(db, { actorId: authz.session.user.id, action: 'channel.control_number.updated', entityType: 'channel', entityId: 'whatsapp' })
+      return Response.json({ saved: true, state: channelState() })
+    }
+
+    if (body.channel === 'whatsapp' && body.action === 'disconnect') {
+      const db = getDatabase()
+      db.prepare("DELETE FROM settings WHERE key='whatsapp_pair_requested'").run()
+      db.prepare(`INSERT INTO settings(key,value,updated_at) VALUES('whatsapp_disconnect_requested','true',?)
+        ON CONFLICT(key) DO UPDATE SET value='true',updated_at=excluded.updated_at`).run(now())
+      db.prepare(`INSERT INTO settings(key,value,updated_at) VALUES('whatsapp_pair_cancelled','true',?)
+        ON CONFLICT(key) DO UPDATE SET value='true',updated_at=excluded.updated_at`).run(now())
+      audit(db, {
+        actorId: authz.session.user.id,
+        action: 'channel.pairing_cancelled',
         entityType: 'channel',
         entityId: 'whatsapp'
       })

@@ -21,7 +21,7 @@ CREATE TABLE sessions (
 );
 CREATE INDEX sessions_expiry_idx ON sessions(expiresAt);
 CREATE INDEX sessions_user_idx ON sessions(userId);
-CREATE TABLE accounts (
+CREATE TABLE user_accounts (
   id TEXT PRIMARY KEY,
   accountId TEXT NOT NULL,
   providerId TEXT NOT NULL,
@@ -36,7 +36,7 @@ CREATE TABLE accounts (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
-CREATE INDEX accounts_user_idx ON accounts(userId);
+CREATE INDEX user_accounts_user_idx ON user_accounts(userId);
 CREATE TABLE verification (
   id TEXT PRIMARY KEY,
   identifier TEXT NOT NULL,

@@ -48,7 +48,7 @@ export default function ScanTargets() {
           <form key={target.key} onSubmit={(event) => scan(event, target)}>
             <button className="big-button" disabled={!target.configured || Boolean(busy)}>
               <strong>{target.label}</strong>
-              <span>{busy === target.key ? 'جارٍ الإرسال…' : target.configured ? 'طلب فحص هذا الحساب' : 'الحساب غير موجود في SAPAuto3'}</span>
+              <span>{busy === target.key ? 'جارٍ الإرسال…' : target.configured ? 'طلب فحص هذا الحساب' : 'الحساب غير موجود في المصدر المحلي'}</span>
             </button>
           </form>
         ))}

@@ -8,7 +8,7 @@ module.exports = async function scanNow({ account = '' } = {}, context) {
   if (account) {
     const configured = await listAccounts()
     const selected = configured.find((item) => item.username.toLowerCase() === account.toLowerCase())
-    if (!selected) throw new Error('That scan account is not configured in SAPAuto3')
+    if (!selected) throw new Error('That scan account is not configured in V8')
     account = selected.username
   }
   return { commandId: createCommand('scan_now', account ? { account } : {}, context.userId), status: 'queued' }

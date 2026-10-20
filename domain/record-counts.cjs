@@ -43,7 +43,16 @@ function getRecordCounts(db, currentTime = new Date()) {
       const timestamp = Date.parse(company.last_scanned_at)
       return Number.isNaN(timestamp) || currentTime.getTime() - timestamp > 24 * 60 * 60 * 1000
     }).length,
-    neverScannedCompanies: companySyncTimes.filter((company) => !company.last_scanned_at).length
+    neverScannedCompanies: companySyncTimes.filter((company) => !company.last_scanned_at).length,
+    archiveDocs: (() => {
+      try { return db.prepare('SELECT COUNT(*) AS n FROM company_documents').get()?.n || 0; } catch (_) { return 0; }
+    })(),
+    archiveExpired: (() => {
+      try { return db.prepare("SELECT COUNT(*) AS n FROM company_documents WHERE expiry_date IS NOT NULL AND expiry_date != '' AND expiry_date < ?").get(today)?.n || 0; } catch (_) { return 0; }
+    })(),
+    archiveExpiringSoon: (() => {
+      try { return db.prepare("SELECT COUNT(*) AS n FROM company_documents WHERE expiry_date IS NOT NULL AND expiry_date != '' AND expiry_date >= ? AND expiry_date <= date(?, '+60 days')").get(today, today)?.n || 0; } catch (_) { return 0; }
+    })()
   }
 }
 

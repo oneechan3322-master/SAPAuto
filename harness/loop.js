@@ -50,8 +50,25 @@ async function scanOne(account, index, total, db, scanner) {
   }
 }
 
+/* A cycle row still marked `running` when no cycle is executing can only be the
+   remains of a process that died mid-scan. Left alone it would display as a
+   forever-running cycle (plan 4.1 §3); honest state is `interrupted`. */
+function reconcileInterruptedCycles(db = getDatabase()) {
+  const stale = db.prepare(`SELECT COUNT(*) AS n FROM automation_cycles WHERE state='running'`).get().n
+  if (stale === 0) return 0
+  const finishedAt = now()
+  const changed = db.prepare(`UPDATE automation_cycles SET state='interrupted',finished_at=?
+    WHERE state='running'`).run(finishedAt).changes
+  if (changed > 0) {
+    db.prepare(`INSERT INTO events(id,kind,payload,created_at) VALUES(?,?,?,?)`)
+      .run(id('event'), 'cycle_interrupted', JSON.stringify({ count: changed }), finishedAt)
+  }
+  return changed
+}
+
 async function runCycle({ db = getDatabase(), scanner = runAccount, accountKey = '' } = {}) {
-  const accounts = await listAccounts()
+  reconcileInterruptedCycles(db)
+  const accounts = await listAccounts(db)
   const selected = accountKey
     ? accounts.filter((account) => account.username.toLowerCase() === accountKey.toLowerCase())
     : accounts
@@ -66,15 +83,29 @@ async function runCycle({ db = getDatabase(), scanner = runAccount, accountKey =
     VALUES(?,?,'running',?)`).run(cycleId, startedAt, queue.length)
   let processed = 0
   let failed = 0
-  for (let i = 0; i < queue.length; i += 1) {
-    if (db.prepare('SELECT paused FROM harness_status WHERE id=1').get().paused) break
-    if (await scanOne(queue[i], i + 1, queue.length, db, scanner)) processed += 1
-    else failed += 1
+  let interrupted = false
+  try {
+    for (let i = 0; i < queue.length; i += 1) {
+      // A pause request stops the cycle between accounts; the cycle did not
+      // finish, so it is recorded as interrupted with its honest progress.
+      if (db.prepare('SELECT paused FROM harness_status WHERE id=1').get().paused) {
+        interrupted = true
+        break
+      }
+      if (await scanOne(queue[i], i + 1, queue.length, db, scanner)) processed += 1
+      else failed += 1
+    }
+  } catch (error) {
+    db.prepare(`UPDATE automation_cycles SET finished_at=?,state='failed',accounts_processed=?,
+      accounts_failed=?,summary=? WHERE id=?`).run(
+      now(), processed, failed, JSON.stringify({ accountKey: accountKey || null, error: String(error.message).slice(0, 300) }), cycleId
+    )
+    throw error
   }
   const finishedAt = now()
-  db.prepare(`UPDATE automation_cycles SET finished_at=?,state='done',accounts_processed=?,
+  db.prepare(`UPDATE automation_cycles SET finished_at=?,state=?,accounts_processed=?,
     accounts_failed=?,summary=? WHERE id=?`).run(
-    finishedAt, processed, failed, JSON.stringify({ accountKey: accountKey || null }), cycleId
+    finishedAt, interrupted ? 'interrupted' : 'done', processed, failed, JSON.stringify({ accountKey: accountKey || null }), cycleId
   )
   setHarnessState('waiting', { current_account: '', account_index: 0, account_total: queue.length }, db)
   return { cycleId, processed, failed, total: queue.length }
@@ -151,4 +182,4 @@ async function runLoop({ db = getDatabase(), scanner = runAccount, sleepMs = 500
   }
 }
 
-module.exports = { runCycle, runLoop, scanOne, queuedScan }
+module.exports = { reconcileInterruptedCycles, runCycle, runLoop, scanOne, queuedScan }

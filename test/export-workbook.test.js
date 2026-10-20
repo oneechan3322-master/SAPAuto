@@ -73,3 +73,23 @@ test('XLSX export preserves typed values, totals, RTL layout, sheets, and safe t
   assert.equal(workbook.getWorksheet('شركة النور').rowCount, 3)
   assert.equal(workbook.getWorksheet('Metadata').getCell('A1').value, 'تاريخ التصدير')
 })
+
+test('XLSX obligation export keeps the portal date as a real Excel date', async () => {
+  const { createExportWorkbook } = await import('../launcher/lib/export-workbook.js')
+  const buffer = await createExportWorkbook([{
+    section: 'obligations',
+    company_id: 'company-portal-date',
+    company_name: 'شركة اختبار البوابة',
+    company_known: true,
+    title: 'إقرار ضريبة المرتبات',
+    source_status: 'unsubmitted',
+    deadline: '2026-11-18',
+    company_last_synced_at: '2026-10-19T10:30:00.000Z'
+  }])
+
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer)
+  const portalDate = workbook.getWorksheet('Details').getCell('E2').value
+  assert.equal(portalDate instanceof Date, true)
+  assert.equal(portalDate.toISOString().slice(0, 10), '2026-11-18')
+})

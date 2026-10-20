@@ -1,5 +1,5 @@
 export default function RecordsFilter({ section, companies = [], query = '', company = '' }) {
-  const supportsCompanyFilter = ['tasks', 'obligations', 'payments', 'messages', 'failures', 'reminders', 'reports'].includes(section)
+  const supportsCompanyFilter = ['tasks', 'obligations', 'payments', 'messages', 'failures', 'reminders', 'reports', 'payroll'].includes(section)
   if (section !== 'companies' && !supportsCompanyFilter) {
     return <p className="records-filter-note">لا تتضمن هذه السجلات ارتباطًا محفوظًا بشركة، لذلك لم نضع اسمًا بالتخمين.</p>
   }

@@ -3,7 +3,7 @@
 const { getDatabase } = require('../db/connect')
 const { boundedText } = require('../domain/bounded-text.cjs')
 const { runAssistant } = require('../assistant/run')
-const { consumeLinkCode, linkedUser, allowUnlinkedReply } = require('./link-codes')
+const { consumeLinkCode, linkedUser } = require('./link-codes')
 const { createConfirmation } = require('../assistant/confirmations')
 
 const ROLE_LEVEL = { Viewer: 0, Operator: 1, Owner: 2 }
@@ -71,9 +71,8 @@ async function handleTelegramUpdate(update, client, db = getDatabase()) {
 
   const user = linkedUser('telegram', externalId, db)
   if (!user || user.disabled) {
-    if (allowUnlinkedReply('telegram', externalId, db)) {
-      await client.api('sendMessage', { chat_id: externalId, text: 'اطلب من مالك النظام رمز ربط في الإعدادات.' })
-    }
+    // Unknown chats are deliberately silent. Linking is opt-in: only a valid
+    // /start code can create a channel association.
     return
   }
   const result = await runAssistant({ userId: user.userId, role: user.role, text })

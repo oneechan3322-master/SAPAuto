@@ -9,6 +9,7 @@ import proposals from '../../../../assistant/code-proposals.js'
 
 const require = createRequire(import.meta.url)
 const { listAccounts } = require('../../../../harness/source.js')
+const { reconcileInterruptedCycles } = require('../../../../harness/loop.js')
 const { createCommand } = require('../../../../db/queries/commands.js')
 const secureStore = require('../../../../channels/secure-store.js')
 
@@ -37,14 +38,17 @@ function boolSetting(key) {
 function capabilities() {
   const telegram = secureStore.hasStoredCredentials('telegram') || Boolean(process.env.TELEGRAM_BOT_TOKEN)
   const gmail = secureStore.hasStoredCredentials('gmail') || Boolean(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
+  const whatsapp = db.prepare("SELECT value FROM settings WHERE key='whatsapp_connected'").get()?.value === 'true'
+  const whatsappPairing = db.prepare("SELECT value FROM settings WHERE key='whatsapp_pair_requested'").get()?.value === 'true'
   const linkedChannels = db.prepare(`SELECT COUNT(*) AS n FROM user_channels c
     JOIN users u ON u.id=c.user_id WHERE u.disabled=0 AND c.verified_at IS NOT NULL`).get().n
-  const deliveryProviders = [telegram, gmail].filter(Boolean).length
+  const deliveryProviders = [telegram, gmail, whatsapp].filter(Boolean).length
   return {
     // Plan 2.4 §3.3 — only channels that can genuinely be used are advertised.
     channels: [
-      { id: 'email', name: 'Gmail', configured: gmail, description: gmail ? 'جاهز لاستقبال التنبيهات' : 'اربط بريدك لاستقبال التنبيهات' },
-      { id: 'telegram', name: 'Telegram', configured: telegram, description: telegram ? 'جاهز لاستقبال التنبيهات' : 'اربط بوتك لاستقبال التنبيهات' }
+      { id: 'email', name: 'Gmail', configured: gmail, status: gmail ? 'configured' : 'unconfigured', description: gmail ? 'تم التحقق من بيانات الربط؛ اختبر التسليم قبل تشغيل الإرسال.' : 'لم يتم ربط بريد Gmail بعد.' },
+      { id: 'telegram', name: 'Telegram', configured: telegram, status: telegram ? 'configured' : 'unconfigured', description: telegram ? 'تم التحقق من رمز البوت؛ اختبر التسليم قبل تشغيل الإرسال.' : 'لم يتم ربط بوت Telegram بعد.' },
+      { id: 'whatsapp', name: 'WhatsApp', configured: whatsapp, status: whatsapp ? 'connected' : (whatsappPairing ? 'pairing' : 'unconfigured'), description: whatsapp ? 'الجلسة متصلة؛ اختبر التسليم قبل تشغيل الإرسال.' : (whatsappPairing ? 'بانتظار مسح رمز QR من هاتف المكتب.' : 'لم يتم ربط WhatsApp بعد.') }
     ],
     linkedChannels,
     liveDeliveryReady: linkedChannels > 0 && deliveryProviders > 0,
@@ -111,6 +115,9 @@ export async function GET(request) {
     source = { ready: false, accountCount: 0, error: String(error.message || error).slice(0, 300) }
   }
 
+  // Plan 4.1 §3: a cycle left `running` by a dead process must not display as
+  // live. Reconcile before reading so the report is honest on every load.
+  reconcileInterruptedCycles(db)
   const status = db.prepare(`SELECT state,current_account,account_index,account_total,last_heartbeat,next_cycle_at,paused
     FROM harness_status WHERE id=1`).get()
   const manager = db.prepare('SELECT state,last_run_at,last_error,updated_at FROM assistant_manager_status WHERE id=1').get()

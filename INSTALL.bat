@@ -39,20 +39,9 @@ call npm run build
 if errorlevel 1 goto failed
 popd
 
-echo Installing SAPAuto3 browser dependencies...
-pushd "%ROOT%..\SAPAuto3"
-node -e "const fs=require('fs');if(fs.lstatSync('node_modules').isSymbolicLink())process.exit(0);process.exit(1)"
-if errorlevel 1 (
-  call npm ci
-  if errorlevel 1 goto failed
-) else (
-  echo Preserving linked node_modules; verifying the existing Playwright dependency...
-  node -e "require.resolve('playwright')"
-  if errorlevel 1 goto failed
-)
+echo Installing browser automation for the V8-native scraper...
 call npx playwright install chromium
 if errorlevel 1 goto failed
-popd
 
 call npm run db:migrate
 if errorlevel 1 goto failed

@@ -1,0 +1,298 @@
+═══════════════════════════════════════════════════════════════════════════════
+ SAPAuto V8 — Comprehensive Operational & Testing Guide
+ File      : v8/test.txt
+ Codename  : INDEPENDENCE / LIVE-OBSERVER
+ Updated   : 2026-10-17
+ Platform  : Node.js v20+ / Windows 11 / Playwright / SQLite / whatsapp-web.js
+═══════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+ §1  WHATSAPP ENGINE — STATUS & LIVE PAIRING PROTOCOL
+────────────────────────────────────────────────────────────────────────────────
+
+1. STATUS: ALIVE & HEALTHY (Tested & Verified via Live API)
+   The engine boots headless Chromium and produces a genuine QR code.
+   Recent fixes and hardenings applied:
+     - Bug 1: channels/whatsapp.js:11 — duplicate `const path` declaration removed.
+     - Bug 2: `const require = createRequire(__filename)` TDZ shadowing resolved.
+     - Bug 3: Hardened Chromium sandbox arguments for Windows background execution:
+       `--no-sandbox`, `--disable-setuid-sandbox`, `--disable-dev-shm-usage`,
+       `--disable-accelerated-2d-canvas`, `--no-first-run`, `--no-zygote`, `--disable-gpu`.
+     - Bug 4: Handled `authenticated` and `auth_failure` events with defensive DB updates.
+     - Bug 5: Fixed `sendMessage(to, text)` to format pure numbers and E.164 strings
+       to valid WhatsApp chat IDs (`<digits>@c.us`) while preserving group JIDs (`@g.us`).
+
+2. VERIFIED EXECUTION TRACE:
+   - Pairing triggered via:
+       POST http://localhost:3000/api/channels
+       Payload: { "channel": "whatsapp", "action": "pair" }
+       Response: { "saved": true, "state": { "whatsapp": { "pairingRequested": true, ... } } }
+   - Process `sapauto-v8-channels` spawned headless Chromium via Puppeteer.
+   - `client.on('qr')` event triggered and rendered standard base64 data URL:
+       "qr": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAARQAA..."
+   - Stored in SQLite database (`settings` table under key `whatsapp_qr`).
+   - Clean startup log:
+       "WhatsApp requires QR pairing; view it in Owner Settings."
+
+3. LIVE PAIRING INSTRUCTIONS:
+   Step A: Navigate to http://localhost:3000/settings in your browser.
+   Step B: Locate the WhatsApp Channel tile (بطاقة قناة الواتساب) and click "اربط واتساب".
+   Step C: The modal will open with the live, auto-refreshing QR code.
+   Step D: Open WhatsApp on the office phone -> Linked Devices -> Link a Device.
+   Step E: Point the phone camera at the QR code on screen.
+   Step F: The settings UI polls every 2.5s. As soon as pairing is acknowledged:
+           - QR code disappears from settings.
+           - Status indicator automatically flips to "متصلة" (Connected).
+           - An audit event `channel.connected` is recorded in `data/v8.db`.
+
+4. ARMING THE 11:44 DAILY DIGEST:
+   Step A: In WhatsApp on the paired office phone, open the target Office Group.
+   Step B: Send the exact phrase:
+             تفعيل اليومية
+   Step C: The bot replies:
+             "تم تفعيل التقرير اليومي هنا. سيصل كل جديد خلال الوقت المحدد."
+   Step D: To disable anytime, send:
+             إيقاف اليومية
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §2  ACCOUNT-BY-ACCOUNT PORTAL SCRAPER TESTING (UNDER WATCH)
+────────────────────────────────────────────────────────────────────────────────
+
+This section provides exact instructions for testing portal scraping for each
+of the 4 configured accounts under direct observation.
+
+Accounts Configured:
+  1. `marwanhamada`  — Active commercial company (United Oils & Paints)
+  2. `205971997`     — Active corporate tax entity (33 registered employees)
+  3. `315240679`     — Active commercial entity
+  4. `533158788`     — Pure general tax account (0 payroll profile on portal)
+
+--------------------------------------------------------------------------------
+ A. HEADED BROWSER TESTING (WATCH IN REAL TIME ON SCREEN)
+--------------------------------------------------------------------------------
+To watch the browser navigate, log in, switch tabs, and read data with your own eyes:
+
+Command:
+  cd "C:\Users\Mega Store\Downloads\SapAuto\v8"
+  node -e "
+    const { scanAccount } = require('./harness/scraper');
+    const { loadScanConfig } = require('./harness/scraper/config');
+    const config = loadScanConfig();
+    config.headedMode = true;
+    config.slowMoMs = 150;
+    
+    // Replace 'marwanhamada' with any of the 4 account keys
+    const accountKey = process.argv[1] || 'marwanhamada';
+    console.log('Starting headed scan for:', accountKey);
+    scanAccount(accountKey, { config })
+      .then(result => {
+        console.log('=== SCAN COMPLETE ===');
+        console.log('Account:', result.account);
+        console.log('Login success:', result.login.success);
+        console.log('Tasks scraped:', result.tasks.length);
+        console.log('Obligations scraped:', result.obligations.length);
+        console.log('Messages scraped:', result.messages.length);
+        console.log('Payments scraped:', result.payments.length);
+      })
+      .catch(err => console.error('Scan failed:', err));
+  " marwanhamada
+
+Run for each account:
+  Account 1: node -e "..." marwanhamada
+  Account 2: node -e "..." 205971997
+  Account 3: node -e "..." 315240679
+  Account 4: node -e "..." 533158788
+
+--------------------------------------------------------------------------------
+ B. WHAT TO OBSERVE STEP-BY-STEP DURING THE RUN:
+--------------------------------------------------------------------------------
+
+  1. KEYCLOAK LOGIN:
+     - URL: https://iam.eta.gov.eg/auth/realms/taxpayer/protocol/openid-connect/300
+     - Inputs: #username and #password populated automatically.
+     - Click: #kc-login.
+     - Expected: Authenticates within 3-8 seconds, redirects to ETA portal.
+
+  2. WORKSPACE COMPANY RESOLUTION:
+     - URL: https://workspace.eta.gov.eg/workspace/dashboard
+     - Expected: Finds semantic link `<a href=\"/workspace/company/...\">`
+     - Authoritative company name and ID are captured and saved to registry.
+
+  3. DOCUMENTS INBOX (#/documents):
+     - URL: https://fpascs.eta.gov.eg:44300/sap/bc/ui5_ui5/sap/ZETA_MCFAPP/index.html...#/documents
+     - Expected: Reads table rows (`tr.sapMListTblRow`).
+     - Downloads PDF for current month (or latest actionable document).
+     - Saves PDF to `v8/data/pdfs/`.
+     - Logs: "Finished processing: X total documents listed, Y new PDF(s) attached".
+
+  4. FILING OBLIGATIONS (#/filing_obligations):
+     - URL: ...#/filing_obligations
+     - Step a (Pending View): Scrapes pending obligations under default filter.
+     - Step b (Complete View): Automatically clicks dropdown and selects "الكل".
+     - Expected: Verifies select label shows "الكل" before reading.
+     - Reconciles full register against portal truth.
+
+  5. MESSAGES DEEP-READ (#/messages):
+     - URL: ...#/messages/AL/
+     - Expected: Lists messages.
+     - Incremental check: Checks previously known message IDs.
+     - For NEW messages: Clicks row, reads inside (`severity`, `msgType`, `subject`, `body`), then returns back to list.
+     - Skips clicking already-read messages to protect execution time.
+
+  6. WORKSPACE PAYMENTS SCRAPER:
+     - URL: Workspace claim route for company ID.
+     - Reads table of claim numbers, amounts, due dates, and currencies.
+
+--------------------------------------------------------------------------------
+ C. STANDALONE CLI TEST (ATOMIC CONTRACT OUTPUT)
+--------------------------------------------------------------------------------
+You can test the contract generation without touching SQLite:
+
+Command:
+  node harness/scraper/cli.js --account marwanhamada --json-out data/test-marwan.json
+
+Verify Output:
+  node -e "
+    const fs = require('fs');
+    const data = JSON.parse(fs.readFileSync('data/test-marwan.json', 'utf8'));
+    console.log({
+      key: data.account.key,
+      label: data.account.label,
+      tasks: data.tasks.length,
+      obligations: data.obligations.length,
+      messages: data.messages.length,
+      payments: data.payments.length
+    });
+  "
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §3  PAYROLL PORTAL SCRAPER TESTING (ZMCF_PAYROLL)
+────────────────────────────────────────────────────────────────────────────────
+
+The payroll scraper navigates to the dedicated payroll portal:
+  URL: https://uptp.eta.gov.eg/sap/bc/ui5_ui5/sap/ZMCF_PAYROLL/index.html?sap-client=300&sap-language=AR#/filing_obligations
+
+1. RUN THE FULL 4-ACCOUNT PAYROLL SCAN:
+    Command from the v8 root (runner lives at the v8 ROOT, not under harness/):
+      node run-payroll-scan.js
+
+ 2. VERIFY THE GENERATED DATA:
+    Files Created:
+      - `v8/data/payroll.json` (Structured JSON)
+      - `v8/data/payroll.csv`  (Arabic UTF-8 with BOM for Excel)
+
+3. EXPECTED VERIFIED COUNTS:
+     - `marwanhamada`: 38 payroll obligations
+     - `205971997`   : 38 payroll obligations (33 employees)
+     - `315240679`   : 38 payroll obligations
+     - `533158788`   : 0 obligations (no payroll profile on portal)
+     - Total Records : 114 obligations across all accounts.
+
+ 4. BROWSER UI VERIFICATION:
+    Visit: http://localhost:3000/payroll
+    Expected:
+      - Summary counters: 114 إجمالي الالتزامات, 3 شركات نشطة
+      - Filter tabs: الكل (114), ربع سنوي (76), تسوية سنوية (38)
+      - Clean Arabic table with Form Name, Period, Due Date, and Status.
+
+ 5. VERIFIED LIVE (2026-10-17):
+    - Runner executed from v8 root: 38 / 38 / 38 / 0 = 114 total exactly.
+    - payroll.json (4 accounts, company names resolved from SQLite) and
+      payroll.csv (42,401 bytes, UTF-8 BOM confirmed, Arabic header row).
+    - /payroll HTTP 200.
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §4  HARNESS AUTOMATION LOOP TESTING (UNDER WATCH)
+────────────────────────────────────────────────────────────────────────────────
+
+The harness orchestrates periodic scans, state transitions, quiet hours, and
+automatic live AI analysis.
+
+ 1. RUN A SINGLE HARNESS PASS MANUALLY:
+    Command (the exported API is runCycle — there is no runOneCycle):
+      node -e "
+        const { runCycle } = require('./harness/loop');
+        runCycle().then(r => console.log('Cycle finished:', r));
+      "
+    Single-account variant:
+      node -e "
+        const { runCycle } = require('./harness/loop');
+        runCycle({ accountKey: 'marwanhamada' }).then(r => console.log('Cycle finished:', r));
+      "
+    Honesty note: while harness_status.paused=1 a manual cycle exits
+    immediately as 'interrupted' (the pause guard at loop.js:91 is by
+    design). Un-pause first, then run the manual cycle.
+
+ 2. WATCH HARNESS STATUS REAL-TIME:
+    Run query (harness_status has no details column — the state fields are
+    state / paused / last_heartbeat / account_total):
+      node -e "
+        const db = require('./db/connect').getDatabase();
+        console.table(db.prepare('SELECT account_key, state, consecutive_failures, last_success_at FROM account_status').all());
+        console.log('Harness:', db.prepare('SELECT state, paused, last_heartbeat, account_total FROM harness_status WHERE id=1').get());
+      "
+
+3. VERIFY LIVE AI ANALYSIS GENERATION:
+   Run query:
+     node -e "
+       const db = require('./db/connect').getDatabase();
+       const obs = db.prepare('SELECT account_key, title, ai_risk_score, substr(ai_study, 1, 80) AS study FROM obligations WHERE ai_study <> \'\'').all();
+       console.log('Studied obligations:', obs.length);
+       console.table(obs);
+       
+       const tasks = db.prepare('SELECT account_key, title, substr(ai_study, 1, 80) AS study FROM tasks WHERE ai_study <> \'\'').all();
+       console.log('Studied tasks:', tasks.length);
+       console.table(tasks);
+     "
+
+ 4. RUN INCREMENTAL TEST ON DEMAND:
+    Command:
+      node -e "
+        const { getDatabase } = require('./db/connect');
+        const { LiveAiAnalyst } = require('./assistant/live-analyst.js');
+        const analyst = new LiveAiAnalyst({ db: getDatabase() });
+        analyst.studyNewAccountEntities('marwanhamada', 1).then(console.log);
+      "
+
+ 5. VERIFIED LIVE (2026-10-17 · under watch):
+    - 4/4 accounts headless CLI scans: login=true, real counts (see below).
+    - HEADED watch-run marwanhamada (slowMo 150): identical contract.
+    - Manual runCycle 1/1 processed, then Study lane: 3 obligations,
+      3 messages, 3 tasks studied live by Gemma in ~90s.
+    - Studied totals: obligations=7 (all with ai_risk_score), tasks=10,
+      messages=7. Harness un-paused, state idle, fresh heartbeat.
+    - Counts per account (tasks/obligations/messages/payments):
+        marwanhamada 12/31/22/62   205971997 9/53/31/62
+        315240679    7/42/25/63    533158788 8/40/24/33 (payments partial
+        read — the status filter switch timed out; recorded honestly as such)
+
+
+────────────────────────────────────────────────────────────────────────────────
+ §5  PM2 PROCESS MANAGEMENT & LOGS
+────────────────────────────────────────────────────────────────────────────────
+
+All 6 microservices must be running and healthy:
+  ┌────┬───────────────────────────┬─────────┬──────────────────────────────┐
+  │ id │ Process Name              │ Port    │ Role                         │
+  ├────┼───────────────────────────┼─────────┼──────────────────────────────┤
+  │ 0  │ sapauto-v8-harness        │ -       │ Background scan loop         │
+  │ 1  │ sapauto-v8-channels       │ -       │ WhatsApp & Telegram broker   │
+  │ 2  │ sapauto-v8-assistant      │ 3001    │ AI Chat / Assistant service  │
+  │ 3  │ sapauto-v8-local-model    │ 7799    │ Gemma Q4_0 LLM Server (CPU)  │
+  │ 4  │ sapauto-v8-mcp            │ -       │ Model Context Protocol       │
+  │ 5  │ sapauto-v8-launcher       │ 3000    │ Next.js Web Dashboard        │
+  └────┴───────────────────────────┴─────────┴──────────────────────────────┘
+
+Commands:
+  npx pm2 list
+  npx pm2 restart all
+  npx pm2 logs sapauto-v8-channels --lines 50
+  npx pm2 logs sapauto-v8-harness --lines 50
+  npx pm2 logs sapauto-v8-launcher --lines 50
+
+═══════════════════════════════════════════════════════════════════════════════
+ END OF TEST PROTOCOL — SAPAuto V8
+═══════════════════════════════════════════════════════════════════════════════

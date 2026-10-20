@@ -9,14 +9,18 @@ const { getDatabase } = require('../db/connect')
 const { audit, id, now } = require('../db/queries/shared')
 const execFileAsync = promisify(execFile)
 
-const SOURCE_EXTENSIONS = new Set(['.bat', '.cjs', '.css', '.html', '.js', '.jsx', '.json', '.md', '.py', '.sql', '.ts', '.tsx'])
-const EXCLUDED_DIRECTORIES = new Set(['.git', '.local', '.next', '.venv', 'auth', 'build', 'coverage', 'credentials', 'data', 'dist', 'logs', 'models', 'node_modules', 'secrets', 'test', 'tests', 'test-results'])
+const SOURCE_EXTENSIONS = new Set(['.cjs', '.css', '.js', '.jsx', '.json', '.md', '.py', '.sql', '.ts', '.tsx'])
+/* Plan 4.1 §4: the ported portal scraper under harness/scraper is vendored
+   automation code with its own contract tests; it is excluded from OpenCode
+   snapshots so proposals cannot silently rewrite it and so ~600KB of portal
+   selectors cannot consume the source budget. */
+const EXCLUDED_DIRECTORIES = new Set(['.git', '.local', '.next', '.venv', 'auth', 'build', 'coverage', 'credentials', 'data', 'dist', 'docs', 'logs', 'models', 'node_modules', 'scratch', 'scraper', 'secrets', 'test', 'tests', 'test-results'])
 /* Planning documents are internal narrative, not source to review. Matched by
    pattern rather than by name: a new plan file must never silently re-enter the
    snapshot budget. */
-const EXCLUDED_FILE_PATTERN = /^(?:plan|readme|changelog|license|agents|codemap|complete-version-analysis|comparison|definition)[^/\\]*\.md$/i
-const MAX_SOURCE_BYTES = 640 * 1024
-const MAX_FILE_BYTES = 48 * 1024
+const EXCLUDED_FILE_PATTERN = /^(?:plan|readme|changelog|license|agents|codemap|complete-version-analysis|comparison|definition|production-beast-prompt)[^/\\]*\.md$/i
+const MAX_SOURCE_BYTES = 1152 * 1024
+const MAX_FILE_BYTES = 56 * 1024
 const MAX_FILES = 400
 const MAX_PROPOSAL_LENGTH = 24000
 
@@ -45,7 +49,7 @@ function openCodeAuthFile() {
 
 function configuredModel() {
   const model = process.env.V8_OPENCODE_MODEL || ''
-  if (!/^[\w.-]+\/[\w.:-]+$/.test(model)) return ''
+  if (!/^[\w.-]+(?:\/[\w.:-]+)+$/.test(model)) return ''
   return model
 }
 

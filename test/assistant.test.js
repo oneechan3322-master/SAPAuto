@@ -6,10 +6,10 @@ const { definitions, execute, tools } = require('../assistant/tools')
 
 test('assistant exposes the planned tools plus gated code-upgrade proposals', () => {
   assert.deepEqual(Object.keys(tools).sort(), [
-    'add_reminder', 'add_task', 'list_failures', 'mark_obligation_done',
-    'request_code_upgrade', 'save_note', 'scan_now', 'send_report', 'status', 'summarize'
+    'add_reminder', 'add_task', 'list_documents', 'list_failures', 'mark_obligation_done',
+    'request_code_upgrade', 'save_note', 'scan_now', 'send_pdf', 'send_pdf_email', 'send_report', 'status', 'summarize'
   ])
-  assert.equal(definitions().length, 10)
+  assert.equal(definitions().length, 13)
 })
 
 test('viewer cannot execute a write tool', async () => {

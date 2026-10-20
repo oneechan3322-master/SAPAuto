@@ -50,7 +50,7 @@ test('MCP requires bearer auth, exposes only registered tools, and queues writes
   client = new Client({ name: 'test-client', version: '1.0.0' })
   await client.connect(transport)
   const listed = await client.listTools()
-  assert.equal(listed.tools.length, 9)
+  assert.equal(listed.tools.length, 11)
   assert.ok(listed.tools.some((tool) => tool.name === 'scan_now'))
   assert.ok(!listed.tools.some((tool) => tool.name === 'raw_sql'))
 

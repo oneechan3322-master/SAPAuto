@@ -45,6 +45,8 @@ function createMcpServer(userId, db, modules) {
     add_reminder: z.object({ target: z.string().optional(), when: z.string(), channel: z.enum(['launcher', 'telegram', 'whatsapp', 'email']).optional() }),
     mark_obligation_done: z.object({ obligation_id: z.string().min(1), evidence: z.string().max(2000).optional() }),
     send_report: z.object({ channel: z.enum(['telegram', 'whatsapp', 'email']), recipients: z.union([z.string(), z.array(z.string())]).optional() }),
+    list_documents: z.object({}),
+    send_pdf: z.object({ task_id: z.string().min(1).max(120) }),
     scan_now: z.object({ account: z.string().max(150).optional() })
   }
   const names = Object.keys(schemas)

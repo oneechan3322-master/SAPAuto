@@ -1,15 +1,199 @@
 import Link from 'next/link'
-import { AlertTriangle, Building2, CheckCircle2, CircleSlash, Clock } from 'lucide-react'
+import { AlertTriangle, Building2, CheckCircle2, CircleSlash, Clock, ExternalLink, FileText } from 'lucide-react'
 import MessagesView from './messages-view.jsx'
 import PaymentWorklist from './payment-worklist.jsx'
+import TaxObligationsView from './tax-obligations-view.jsx'
 import CompanyAssignment from './company-assignment.jsx'
 import CopyCompanyName from './copy-company-name.jsx'
 import SyncMeta from './sync-meta.jsx'
 import recordStatus from '../../domain/record-status.cjs'
 import identity from '../../domain/company-identity.cjs'
+import legalDeadlines from '../../domain/legal-deadlines.cjs'
 import { displayText } from '../../domain/display-text.cjs'
 
 const { UNREGISTERED_COMPANY_NAME, companyInitials: initialsOf } = identity
+
+/**
+ * Plan 4.5 — the legal deadline card on a studied obligation: which document
+ * the law requires, how many days it grants, and the live countdown so the
+ * accountant sends the document while there is still time.
+ */
+const DEADLINE_TONE_COLORS = {
+  calm: { background: 'var(--done-soft)', text: 'var(--done)', edge: 'var(--done-line)' },
+  attention: { background: 'var(--soon-soft)', text: 'var(--soon)', edge: 'var(--soon-line)' },
+  urgent: { background: 'var(--overdue-soft)', text: 'var(--overdue)', edge: 'var(--overdue-line)' }
+}
+
+function LegalDeadlineCard({ row }) {
+  if (!row.required_doc) return null
+  const days = typeof row.days_left === 'number' ? row.days_left : null
+  const colors = DEADLINE_TONE_COLORS[row.deadline_tone] || DEADLINE_TONE_COLORS.calm
+  let countdown
+  if (days === null) countdown = 'المتبقي غير محسوم'
+  else if (days === 0) countdown = 'تنتهي اليوم'
+  else if (days < 0) countdown = `انتهت المهلة منذ ${legalDeadlines.formatArabicDays(Math.abs(days))}`
+  else countdown = `متبقٍ ${legalDeadlines.formatArabicDays(days)}`
+  return (
+    <div className="record-legal-deadline" style={{
+      margin: '8px 0 4px',
+      padding: '10px 12px',
+      backgroundColor: colors.background,
+      borderRadius: 6,
+      borderRight: `3px solid ${colors.edge}`
+    }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontWeight: 600, marginBottom: 4 }}>
+        <span style={{ color: colors.text }}>المستند المطلوب: {row.required_doc}</span>
+        {days !== null && (
+          <span style={{
+            fontSize: '0.75rem',
+            padding: '2px 8px',
+            borderRadius: 4,
+            background: colors.background,
+            color: colors.text
+          }}>
+            {countdown}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: '0.8rem', lineHeight: 1.6 }}>
+        {row.anchor_mode === 'portal_date'
+          ? `صالحة حتى: ${row.respond_by}`
+          : `المهلة القانونية: ${row.legal_days} يوماً — الموعد النهائي: ${row.respond_by}`}
+        {row.deadline_basis ? <div style={{ marginTop: 2, opacity: 0.75 }}>{row.deadline_basis}</div> : null}
+      </div>
+    </div>
+  )
+}
+
+function SecretaryTaskCard({ row }) {
+  const memo = row.secretary_memo || {}
+  const days = typeof row.days_left === 'number' ? row.days_left : null
+  const colors = DEADLINE_TONE_COLORS[row.deadline_tone] || DEADLINE_TONE_COLORS.calm
+
+  let countdown = null
+  if (days !== null) {
+    if (days === 0) countdown = 'تنتهي اليوم'
+    else if (days < 0) countdown = `متأخر منذ ${legalDeadlines.formatArabicDays(Math.abs(days))}`
+    else countdown = `متبقٍ ${legalDeadlines.formatArabicDays(days)}`
+  }
+
+  const portalHref = row.portal_url || 'https://fpascs.eta.gov.eg:44300/sap/bc/ui5_ui5/sap/ZETA_MCFAPP/index.html?sap-client=300&sap-language=ar#/filing_obligations'
+
+  return (
+    <div className="secretary-task-card" style={{
+      margin: '10px 0 6px',
+      padding: '12px 14px',
+      backgroundColor: '#f8fafc',
+      borderRadius: '8px',
+      border: '1px solid #e2e8f0',
+      borderRight: '4px solid #0284c7',
+      fontSize: '0.85rem'
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, color: '#0369a1', fontSize: '0.88rem' }}>
+          <FileText size={16} />
+          <span>مذكرة سكرتير المكتب التنفيذية:</span>
+        </div>
+        {countdown && (
+          <span style={{
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            padding: '3px 9px',
+            borderRadius: '6px',
+            background: colors.background,
+            color: colors.text,
+            border: `1px solid ${colors.edge}`
+          }}>
+            ⏳ {countdown}
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', lineHeight: 1.5 }}>
+        {/* Question 1: What is the task? */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+          <span style={{ fontWeight: 800, minWidth: '130px', color: '#0369a1' }}>📌 ما هي المهمة؟</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <span style={{ color: '#0f172a', fontWeight: 700 }}>
+              {memo.requiredDoc || row.title || 'إجراء ضريبي تنفيذي مطلوب'}
+            </span>
+            {memo.executiveAction && (
+              <span style={{ color: '#334155', fontSize: '0.82rem' }}>
+                {memo.executiveAction}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Question 2: What is the deadline? */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+          <span style={{ fontWeight: 800, minWidth: '130px', color: '#b45309' }}>⏳ الموعد والمهلة:</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ color: '#0f172a', fontWeight: 700 }}>
+                {row.deadline ? `تاريخ الاستحقاق: ${row.deadline}` : 'تاريخ الموعد: محدد بالقانون'}
+              </span>
+              {countdown && (
+                <span style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  background: colors.background,
+                  color: colors.text,
+                  border: `1px solid ${colors.edge}`
+                }}>
+                  {countdown}
+                </span>
+              )}
+            </div>
+            {memo.legalDeadline && (
+              <span style={{ color: '#64748b', fontSize: '0.78rem' }}>
+                السند القانوني: {memo.legalDeadline}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Question 3: Who is responsible? */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span style={{ fontWeight: 800, minWidth: '130px', color: '#047857' }}>👤 المسؤول المكلف:</span>
+          <span style={{
+            fontSize: '0.8rem',
+            padding: '2px 10px',
+            borderRadius: '5px',
+            backgroundColor: '#ecfdf5',
+            color: '#065f46',
+            border: '1px solid #a7f3d0',
+            fontWeight: 700
+          }}>
+            {memo.assignedRole || row.assigned_to || 'المحاسب القانوني للملف'}
+          </span>
+        </div>
+      </div>
+
+      <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+        <a
+          href={portalHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            fontSize: '0.78rem',
+            color: '#0284c7',
+            textDecoration: 'none',
+            fontWeight: 600
+          }}
+        >
+          <span>فتح المعاملة على بوابة الضرائب</span>
+          <ExternalLink size={12} />
+        </a>
+      </div>
+    </div>
+  )
+}
 
 /**
  * Plan 2.4 §4.1 — a status chip carries text, an icon AND colour. Colour alone
@@ -48,6 +232,7 @@ export default function RecordsView({ section, rows, companyOptions = [], locale
   if (section === 'messages') return <MessagesView rows={rows} />
   // Plan 2.4 §3.3 — payments get a worklist, not a card wall.
   if (section === 'payments') return <PaymentWorklist rows={rows} locale={locale} truncation={truncation} />
+  if (section === 'obligations') return <TaxObligationsView rows={rows} companyOptions={companyOptions} locale={locale} />
   if (!titles[section]) return <p className="error">هذه الصفحة غير متاحة.</p>
   if (!rows.length) return <RecordsEmpty section={section} />
 
@@ -92,9 +277,7 @@ function RecordCard({ section, row, index, companyOptions, locale }) {
           {state.label && <StatusPill tone={state.tone} label={state.label} />}
         </div>
         <h2 className="record-card-title">{title}</h2>
-        {row.required_action && safeTitle(row.required_action, '') && (
-          <p className="record-card-description">{safeTitle(row.required_action, '')}</p>
-        )}
+        <SecretaryTaskCard row={row} />
         <RecordMeta row={row} company={company} date={date} locale={locale} />
       </article>
     )
@@ -112,6 +295,7 @@ function RecordCard({ section, row, index, companyOptions, locale }) {
         </div>
         <h2 className="record-card-title">{title}</h2>
         {period && period !== title && <p className="record-card-description">{period}</p>}
+        <LegalDeadlineCard row={row} />
         <RecordMeta row={row} company={company} date={date} locale={locale} />
       </article>
     )
@@ -277,8 +461,8 @@ function CompanyCards({ rows, locale }) {
                   اسم البوابة: {company.company_portal_name}
                 </p>
               )}
-              {!known && company.company_name_origin === 'unverified_mapping' && (
-                <p className="company-card-identity-help">اسم محفوظ يحتاج إلى تأكيد: {company.company_name_candidate}</p>
+              {company.company_name_origin === 'unverified_mapping' && (
+                <p className="company-card-identity-help">اسم محفوظ يحتاج إلى تأكيد: {company.company_name_candidate || name}</p>
               )}
               {!known && !['conflict', 'unverified_mapping'].includes(company.company_name_origin) && (
                 <p className="company-card-identity-help">لم يصلنا اسم الشركة من البوابة بعد.</p>
@@ -303,6 +487,13 @@ function CompanyCards({ rows, locale }) {
                   <strong>{number(company.due_this_week_obligations)}</strong> التزام خلال 7 أيام
                 </span>
               </p>
+              {(company.next_obligation_deadline || company.next_payment_due_date) && (
+                <p className="company-card-next-date">
+                  {company.next_obligation_deadline && <span>أقرب التزام: <strong>{companyDueDate(company.next_obligation_deadline, locale)}</strong></span>}
+                  {company.next_obligation_deadline && company.next_payment_due_date && <span aria-hidden="true"> · </span>}
+                  {company.next_payment_due_date && <span>أقرب سداد: <strong>{companyDueDate(company.next_payment_due_date, locale)}</strong></span>}
+                </p>
+              )}
             </Link>
             <div className="company-card-footer">
               <span
@@ -327,6 +518,12 @@ function CompanyCards({ rows, locale }) {
       })}
     </div>
   )
+}
+
+function companyDueDate(value, locale = 'ar-EG-u-nu-latn') {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value || '')
+  return new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Africa/Cairo' }).format(date)
 }
 
 function RecordsEmpty({ section }) {
