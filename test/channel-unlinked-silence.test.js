@@ -24,9 +24,12 @@ test('unlinked contacts never receive automatic pairing replies', () => {
 })
 
 test('a paired WhatsApp session is restored after the channel worker restarts', () => {
-  const worker = read('index.js')
-  assert.match(worker, /pairingRequested \|\| whatsappConnected/,
-    'a persisted connected session must start the WhatsApp provider again')
+  // Opus5.5 §6.2: the WhatsApp client and its session restore moved from the
+  // channels worker to the dedicated wa-sender process; the guard moves with
+  // the behaviour.
+  const sender = read('wa-sender.js')
+  assert.match(sender, /pairingRequested \|\| whatsappConnected/,
+    'a persisted connected session must start the WhatsApp sender again')
 })
 
 test('WhatsApp refuses delivery before its browser session reports ready', () => {

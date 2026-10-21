@@ -4,26 +4,30 @@ const { getDatabase } = require('../db/connect')
 const { now } = require('../db/queries/shared')
 const summarize = require('../assistant/tools/summarize')
 const { randomUUID } = require('node:crypto')
+const { enqueue } = require('./outbox')
 
 function messageMode(db = getDatabase()) {
   const row = db.prepare("SELECT value FROM settings WHERE key='message_mode'").get()
   return row ? row.value : 'dry-run'
 }
 
-// Outbox shadow phase (Opus5.5 §6.2): while the legacy direct-send path stays
-// authoritative, every would-be delivery is also recorded in
-// notification_outbox. Shadow rows are never claimed by a sender, so they can
-// never be replayed as real messages after cut-over. Setting `outbox_mode` to
-// anything but 'shadow' turns the recording off; 'live' cut-over only becomes
-// meaningful once the transport senders exist and is deliberately not wired here.
-function outboxShadowEnabled(db) {
+// Outbox phases (Opus5.5 §6.2), keyed on settings `outbox_mode`:
+//   'shadow' (default) — legacy direct-send stays authoritative; every would-be
+//     delivery is mirrored into notification_outbox for replay parity checks.
+//   'live' — cut-over: real (shadow=0) rows are queued here and the sender
+//     processes (wa-sender / mailtg-sender) are the only deliverers.
+//   'off' — no outbox recording; pre-§6.2 behaviour only.
+function outboxMode(db = getDatabase()) {
   const row = db.prepare("SELECT value FROM settings WHERE key='outbox_mode'").get()
-  return (row ? row.value : 'shadow') === 'shadow'
+  return row ? row.value : 'shadow'
+}
+
+function outboxShadowEnabled(db) {
+  return outboxMode(db) === 'shadow'
 }
 
 function recordOutboxShadow(event, link, text, db) {
   try {
-    const { enqueue } = require('./outbox')
     enqueue({
       eventId: event.id,
       channel: link.channel,
@@ -34,6 +38,24 @@ function recordOutboxShadow(event, link, text, db) {
   } catch (error) {
     // Shadow recording must never break real delivery.
     console.error(`Outbox shadow record failed for event ${event.id}: ${error.message}`)
+  }
+}
+
+// Cut-over: queue a real (claimable) row for the senders. A durable outbox row
+// is the delivery record; provider_msg_id/last_error then track provider truth.
+function enqueueOutboxReal(event, link, text, db) {
+  try {
+    enqueue({
+      eventId: event.id,
+      channel: link.channel,
+      recipient: link.external_id,
+      payload: { text, kind: event.kind, accountKey: event.account_key || null },
+      shadow: false
+    }, db)
+    return true
+  } catch (error) {
+    console.error(`Outbox queue failed for event ${event.id} via ${link.channel}: ${error.message}`)
+    return false
   }
 }
 
@@ -94,10 +116,40 @@ function wakeGroupText(events) {
 
 async function flushWakeBacklog(events, providers, db = getDatabase()) {
   const wake = wakeSettings(db)
-  if (!wake.enabled || !wake.externalId || !providers.whatsapp || messageMode(db) === 'live') return new Set()
+  const queueLive = outboxMode(db) === 'live'
+  if (!wake.enabled || !wake.externalId) return new Set()
+  if (!providers.whatsapp && !queueLive) return new Set()
+  if (!queueLive && messageMode(db) === 'live') return new Set()
   const batchable = events.filter((event) => WAKE_BATCHABLE.has(event.kind))
   if (batchable.length <= 4) return new Set()
-  await providers.whatsapp(wake.externalId, wakeGroupText(batchable).slice(0, 3500))
+  const text = wakeGroupText(batchable).slice(0, 3500)
+  if (queueLive) {
+    // Hourly grouping key: retries after a crash cannot duplicate more than
+    // one hourly digest, and the next hour can always start a new one.
+    const groupId = `wake-group-${new Date().toISOString().slice(0, 13)}`
+    try {
+      enqueue({
+        eventId: groupId,
+        channel: 'whatsapp',
+        recipient: wake.externalId,
+        payload: { text, kind: 'wake_group' },
+        shadow: false
+      }, db)
+    } catch (error) {
+      console.error(`Wake backlog queue failed: ${error.message}`)
+      return new Set()
+    }
+    const timestamp = now()
+    db.transaction(() => {
+      for (const event of batchable) {
+        db.prepare('INSERT OR IGNORE INTO channel_deliveries(event_id,channel,external_id,sent_at,status) VALUES(?,?,?,?,?)')
+          .run(event.id, 'whatsapp', wake.externalId, timestamp, 'sent')
+        db.prepare('UPDATE events SET announced=1 WHERE id=?').run(event.id)
+      }
+    }).immediate()
+    return new Set(batchable.map((event) => event.id))
+  }
+  await providers.whatsapp(wake.externalId, text)
   const timestamp = now()
   const stamp = db.transaction(() => {
     for (const event of batchable) {
@@ -153,6 +205,7 @@ async function contentFor(event, payload, db) {
 
 async function deliverEvent(event, providers, db = getDatabase()) {
   const payload = JSON.parse(event.payload || '{}')
+  const queueLive = outboxMode(db) === 'live'
   if (event.kind === 'reminder_due') {
     const reminder = db.prepare('SELECT user_id,channel,cancelled_at FROM reminders WHERE id=?').get(event.entity_id)
     if (!reminder || reminder.cancelled_at) {
@@ -182,7 +235,7 @@ async function deliverEvent(event, providers, db = getDatabase()) {
   const wakeEnabled = db.prepare("SELECT value FROM settings WHERE key='whatsapp_wake_notifications'").get()?.value === 'true'
   const controlNumber = db.prepare("SELECT value FROM settings WHERE key='whatsapp_control_number'").get()?.value || ''
   const wakeKinds = new Set(['new_doc', 'changed_doc', 'deadline_reminder', 'reminder_due', 'assistant_attention', 'account_parked', 'harness_offline'])
-  if (wakeEnabled && controlNumber && wakeKinds.has(event.kind) && providers.whatsapp) {
+  if (wakeEnabled && controlNumber && wakeKinds.has(event.kind) && (providers.whatsapp || queueLive)) {
     const controlExternalId = `${controlNumber.replace(/^\+/, '')}@c.us`
     if (!links.some((link) => link.channel === 'whatsapp' && link.external_id === controlExternalId)) {
       links = [...links, { channel: 'whatsapp', external_id: controlExternalId }]
@@ -190,8 +243,16 @@ async function deliverEvent(event, providers, db = getDatabase()) {
   }
   let eligible = 0
   const shadowEnabled = outboxShadowEnabled(db)
+  // After the sender split the dispatcher process carries NO provider objects.
+  // The transport channels stay deliverable then: 'live' queues real rows, and
+  // otherwise shadow recording keeps mirroring what WOULD have been delivered.
+  const transportChannel = (channel) => channel === 'whatsapp' || channel === 'telegram' || channel === 'email'
   for (const link of links) {
-    if (!providers[link.channel]) continue
+    // Dispatch paths: direct provider (legacy and test fakes), the sender
+    // processes through the outbox queue, or shadow mirroring for a transport
+    // channel whose provider no longer lives in this process.
+    const hasProvider = Boolean(providers[link.channel])
+    if (!hasProvider && !queueLive && !(shadowEnabled && transportChannel(link.channel))) continue
     if (event.kind === 'report_requested' &&
         (!Array.isArray(payload.recipients) || !payload.recipients.includes(link.external_id))) continue
     eligible += 1
@@ -199,12 +260,18 @@ async function deliverEvent(event, providers, db = getDatabase()) {
       .get(event.id, link.channel, link.external_id)
     if (exists) continue
     if (!text) throw new Error(`No message body for ${event.kind}`)
-    if (shadowEnabled) recordOutboxShadow(event, link, text, db)
     const isWakeTarget = link.channel === 'whatsapp' &&
       link.external_id === `${controlNumber.replace(/^\+/, '')}@c.us` && wakeEnabled
+    if (queueLive) {
+      enqueueOutboxReal(event, link, text, db)
+      db.prepare('INSERT INTO channel_deliveries(event_id,channel,external_id,sent_at,status) VALUES(?,?,?,?,?)')
+        .run(event.id, link.channel, link.external_id, now(), 'sent')
+      continue
+    }
+    if (shadowEnabled) recordOutboxShadow(event, link, text, db)
     const mode = isWakeTarget || messageMode(db) === 'live' ? 'sent' : 'dry_run'
     let deliveryStatus = mode
-    if (mode === 'sent') {
+    if (mode === 'sent' && hasProvider) {
       try {
         await providers[link.channel](link.external_id, text)
       } catch (sendErr) {
@@ -212,12 +279,18 @@ async function deliverEvent(event, providers, db = getDatabase()) {
         deliveryStatus = 'failed'
       }
     }
+    if (mode === 'sent' && !hasProvider) {
+      // Provider left this process (sender split): the operator cut-over path
+      // and legacy live only differ by where delivery happens; without an
+      // in-process provider nothing was really sent.
+      deliveryStatus = 'dry_run'
+    }
     db.prepare('INSERT INTO channel_deliveries(event_id,channel,external_id,sent_at,status) VALUES(?,?,?,?,?)')
       .run(event.id, link.channel, link.external_id, now(), deliveryStatus)
   }
   if (eligible > 0) {
     db.prepare('UPDATE events SET announced=1 WHERE id=?').run(event.id)
-    const mode = messageMode(db) === 'live' ? 'sent' : 'dry_run'
+    const mode = queueLive || messageMode(db) === 'live' ? 'sent' : 'dry_run'
     if (payload.reportId) {
       if (mode === 'sent') db.prepare("UPDATE reports SET delivery_status='sent',sent_at=? WHERE id=?")
         .run(now(), payload.reportId)
@@ -303,4 +376,4 @@ function startEventDispatcher(providers, { db = getDatabase(), intervalMs = 1000
   return () => clearInterval(timer)
 }
 
-module.exports = { deliverEvent, startEventDispatcher, checkHarnessOffline, enqueueDueReminders, messageMode }
+module.exports = { deliverEvent, startEventDispatcher, checkHarnessOffline, enqueueDueReminders, messageMode, outboxMode }

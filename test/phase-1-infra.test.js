@@ -213,3 +213,104 @@ test('shutdown runs cleanup once and exits cleanly on the PM2 message', () => {
   assert.match(result.stdout, /cleanup-ran/)
   assert.doesNotMatch(result.stdout, /still-running/)
 })
+
+test('outbox rows accept command ids without an events row (migration 033)', (t) => {
+  const db = freshDb(t)
+  const foreignKeys = db.pragma("foreign_keys_list(notification_outbox)")
+  assert.deepEqual(foreignKeys, [], 'no outbox FK may block command rows anymore')
+  const queued = outbox.enqueue({
+    eventId: 'channel-test-cmd-1',
+    channel: 'whatsapp',
+    recipient: '20100000000@c.us',
+    payload: { text: 'test', kind: 'channel_test' }
+  }, db)
+  assert.equal(queued.inserted, true)
+  const claimed = outbox.claim('whatsapp', 5, db)
+  assert.equal(claimed.length, 1)
+})
+
+test('outbox.defer releases a transport outage without an attempt penalty', (t) => {
+  const db = freshDb(t)
+  seedEvent(db)
+  outbox.enqueue({ eventId: 'event-1', channel: 'whatsapp', recipient: '20100000000@c.us', payload: { text: 'x' } }, db)
+  const [row] = outbox.claim('whatsapp', 1, db)
+  assert.equal(row.attempts, 1)
+  outbox.defer(row.id, { seconds: 30, db })
+  const released = db.prepare('SELECT * FROM notification_outbox WHERE id=?').get(row.id)
+  assert.equal(released.status, 'pending')
+  assert.equal(released.attempts, 0)
+  assert.ok(Date.parse(released.next_attempt_at) > Date.now())
+  assert.equal(released.lease_owner, null)
+})
+
+test('deliverEvent queues real rows for senders when outbox_mode is live', async (t) => {
+  const db = freshDb(t)
+  const timestamp = new Date().toISOString()
+  db.prepare(`INSERT INTO users(id,name,email,createdAt,updatedAt,role)
+    VALUES('owner-1','Owner','owner@example.test',?,?,'Owner')`).run(timestamp, timestamp)
+  db.prepare(`INSERT INTO user_channels(id,user_id,channel,external_id,verified_at)
+    VALUES('whatsapp-1','owner-1','whatsapp','20100000000@c.us',?)`).run(timestamp)
+  seedEvent(db, 'event-live', 'harness_offline')
+  db.prepare(`INSERT INTO settings(key,value,updated_at) VALUES('outbox_mode','live',?)
+    ON CONFLICT(key) DO UPDATE SET value='live',updated_at=excluded.updated_at`).run(timestamp)
+
+  const event = db.prepare("SELECT * FROM events WHERE id = 'event-live'").get()
+  const noProvider = {}
+  assert.equal(await deliverEvent(event, noProvider, db), true)
+
+  const rows = db.prepare('SELECT * FROM notification_outbox').all()
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].event_id, 'event-live')
+  assert.equal(rows[0].channel, 'whatsapp')
+  assert.equal(rows[0].recipient, '20100000000@c.us')
+  assert.equal(rows[0].shadow, 0)
+  assert.equal(rows[0].status, 'pending')
+  // The dispatcher never called a provider; the queued row is the record.
+  assert.deepEqual(noProvider, {})
+  assert.equal(db.prepare("SELECT status FROM channel_deliveries WHERE event_id='event-live'").get().status, 'sent')
+  // Idempotent: a dispatcher replay must not queue a second real message.
+  assert.equal(await deliverEvent(event, noProvider, db), true)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get().n, 1)
+})
+
+test('shadow mirroring survives the sender split without provider objects', async (t) => {
+  const db = freshDb(t)
+  const timestamp = new Date().toISOString()
+  db.prepare(`INSERT INTO users(id,name,email,createdAt,updatedAt,role)
+    VALUES('owner-1','Owner','owner@example.test',?,?,'Owner')`).run(timestamp, timestamp)
+  db.prepare(`INSERT INTO user_channels(id,user_id,channel,external_id,verified_at)
+    VALUES('telegram-1','owner-1','telegram','chat-9',?)`).run(timestamp)
+  seedEvent(db, 'event-no-prov', 'harness_offline')
+
+  const event = db.prepare("SELECT * FROM events WHERE id = 'event-no-prov'").get()
+  assert.equal(await deliverEvent(event, {}, db), true)
+  const rows = db.prepare('SELECT * FROM notification_outbox').all()
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].channel, 'telegram')
+  assert.equal(rows[0].shadow, 1)
+  assert.equal(outbox.claim('telegram', 10, db).length, 0, 'shadow rows stay invisible')
+})
+
+test('a dry_run reminder in live outbox mode is queued, not skipped', async (t) => {
+  const db = freshDb(t)
+  const timestamp = new Date().toISOString()
+  db.prepare(`INSERT INTO users(id,name,email,createdAt,updatedAt,role)
+    VALUES('owner-1','Owner','owner@example.test',?,?,'Owner')`).run(timestamp, timestamp)
+  db.prepare(`INSERT INTO user_channels(id,user_id,channel,external_id,verified_at)
+    VALUES('telegram-1','owner-1','telegram','chat-1',?)`).run(timestamp)
+  db.prepare(`INSERT INTO reminders(id,target_type,target_id,user_id,due_at,channel,dedupe_key,created_at,message)
+    VALUES('reminder-q','general','','owner-1',?,'telegram','owner-1:general:q',?,'Queue me')`)
+    .run(new Date(Date.now() - 1000).toISOString(), timestamp)
+  db.prepare(`INSERT INTO settings(key,value,updated_at) VALUES('outbox_mode','live',?)
+    ON CONFLICT(key) DO UPDATE SET value='live',updated_at=excluded.updated_at`).run(timestamp)
+
+  // The due-reminders event row is produced by the dispatcher helper itself.
+  const { enqueueDueReminders } = require('../channels/events')
+  assert.equal(enqueueDueReminders(db), 1)
+  const event = db.prepare("SELECT * FROM events WHERE kind='reminder_due'").get()
+  assert.equal(await deliverEvent(event, {}, db), true)
+  const row = db.prepare("SELECT * FROM notification_outbox WHERE event_id=?").get(event.id)
+  assert.ok(row, 'the reminder delivery was queued for the senders')
+  assert.equal(row.channel, 'telegram')
+  assert.equal(db.prepare("SELECT delivery_status FROM reminders WHERE id='reminder-q'").get().delivery_status, 'sent')
+})

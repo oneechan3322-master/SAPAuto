@@ -5,12 +5,25 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 const { getDatabase } = require('../db/connect')
 const { runMigrations } = require('../db/migrate')
 const { pollTelegram, createTelegram } = require('./telegram')
-const { startGmailPoller, sendGmail } = require('./gmail')
+const { startGmailPoller } = require('./gmail')
 const { startEventDispatcher } = require('./events')
+const outbox = require('./outbox')
 const secureStore = require('./secure-store')
 const { getChannelStatus } = require('../domain/channel-broker.cjs')
 const { audit } = require('../db/queries/shared')
 const { startHeartbeat: startServiceHeartbeat } = require('../lib/heartbeat')
+
+// A sender process that stopped heartbeating must not silently accept queued
+// command deliveries; the queue holds them until it returns.
+function senderFresh(db, service, seconds = 180) {
+  const row = db.prepare('SELECT last_heartbeat FROM service_status WHERE service=?').get(service)
+  const at = row?.last_heartbeat
+  return Boolean(at) && (Date.now() - Date.parse(at)) <= seconds * 1000
+}
+
+function queueReal(db, { eventId, channel, recipient, payload }) {
+  return outbox.enqueue({ eventId, channel, recipient, payload, shadow: false }, db)
+}
 
 async function main() {
   const db = getDatabase()
@@ -22,40 +35,8 @@ async function main() {
   let telegramController = null
   let activeGmailKey = ''
   let stopGmail = null
-  let whatsappClient = null
-  let whatsappStarting = false
-  let whatsappLastAttemptAt = 0
-  let whatsappPairRetries = 0
-
-  async function upsertChannelRegistry(id, providerType, status, draftOnly, connectionPayloadRef, lastError) {
-    const existing = db.prepare('SELECT id FROM channel_registry WHERE id = ?').get(id)
-    const nowIso = new Date().toISOString()
-    if (existing) {
-      db.prepare(
-        `UPDATE channel_registry SET provider_type = ?, status = ?, draft_only = ?,
-           connection_payload_ref = ?, last_error = ?, updated_at = ?
-         WHERE id = ?`
-      ).run(providerType, status, draftOnly, connectionPayloadRef, lastError, nowIso, id)
-    } else {
-      db.prepare(
-        `INSERT INTO channel_registry(id, provider_type, status, draft_only, connection_payload_ref,
-           last_heartbeat_at, last_error, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`
-      ).run(id, providerType, status, draftOnly, connectionPayloadRef, lastError, nowIso, nowIso)
-    }
-  }
 
   async function syncProviders() {
-    const disconnectRequested = db.prepare("SELECT value FROM settings WHERE key='whatsapp_disconnect_requested'").get()?.value === 'true'
-    if (disconnectRequested) {
-      if (whatsappClient) {
-        try { await whatsappClient.destroy() } catch { /* ignore */ }
-        whatsappClient = null
-      }
-      delete providers.whatsapp
-      db.prepare("DELETE FROM settings WHERE key IN ('whatsapp_disconnect_requested','whatsapp_connected','whatsapp_qr','whatsapp_pair_requested')").run()
-      await upsertChannelRegistry('whatsapp-office-primary', 'whatsapp_web', 'unconfigured', 1, null, null)
-    }
     const credentials = secureStore.readAll()
     const telegramToken = credentials.telegram?.token || process.env.TELEGRAM_BOT_TOKEN || ''
     if (telegramToken !== activeTelegramToken) {
@@ -65,7 +46,6 @@ async function main() {
       activeTelegramToken = telegramToken
       if (telegramToken) {
         const telegram = createTelegram(telegramToken)
-        providers.telegram = async (chatId, text) => telegram.api('sendMessage', { chat_id: chatId, text })
         telegramController = new AbortController()
         tasks.push(pollTelegram({ token: telegramToken, signal: telegramController.signal }))
       }
@@ -83,61 +63,7 @@ async function main() {
       if (gmailUser && gmailPassword) {
         process.env.GMAIL_USER = gmailUser
         process.env.GMAIL_APP_PASSWORD = gmailPassword
-        providers.email = sendGmail
         stopGmail = startGmailPoller({ db })
-      }
-    }
-
-    const pairingRequested = db.prepare("SELECT value FROM settings WHERE key='whatsapp_pair_requested'").get()?.value === 'true'
-    // A paired WhatsApp session must be restored after a worker restart. The
-    // old condition only started the client while pairing was requested, so a
-    // database could say "connected" while no sender process existed.
-    const registryStatus = db.prepare("SELECT status FROM channel_registry WHERE id='whatsapp-office-primary'").get()?.status || 'unconfigured'
-    const whatsappConnected = db.prepare("SELECT value FROM settings WHERE key='whatsapp_connected'").get()?.value === 'true'
-    const whatsappControlConfigured = Boolean(db.prepare("SELECT value FROM settings WHERE key='whatsapp_control_number'").get()?.value)
-    // A `disconnected` event belongs to the previous browser client. Leaving
-    // that object in this worker prevents the pending pairing request from ever
-    // creating a replacement client. Release it before evaluating the next
-    // start; do not call logout here (logout removes LocalAuth files and can
-    // collide with Chromium's still-closing lock file).
-    if (whatsappClient && registryStatus === 'unhealthy' && !whatsappConnected) {
-      try { await whatsappClient.destroy() } catch { /* the client is already closed */ }
-      whatsappClient = null
-      delete providers.whatsapp
-    }
-    // Restore an existing local session after restart, but never rely on its
-    // stored connected flag to claim a usable sender before `ready` fires.
-    // A configured control number is a standing instruction to restore the
-    // local WhatsApp session. Previously an `unhealthy` state was terminal:
-    // one transient Chromium failure stopped all future replies until someone
-    // pressed Pair again, even though the authenticated local session existed.
-    // `ready` remains the sole proof that sending is permitted.
-    const whatsappEnabled = process.env.WHATSAPP_ENABLED === 'true' || pairingRequested || whatsappConnected || whatsappControlConfigured || registryStatus === 'connecting'
-    // Flaky first handshakes must not kill the pairing window: retry with a
-    // cooldown, keep the request armed for a bounded number of attempts, and
-    // only then drop it to avoid a hot loop on a genuinely broken setup.
-    const cooldownPassed = Date.now() - whatsappLastAttemptAt > 20000
-    if (whatsappEnabled && !whatsappClient && !whatsappStarting && cooldownPassed) {
-      whatsappStarting = true
-      whatsappLastAttemptAt = Date.now()
-      try {
-        const whatsappChannel = require('./whatsapp')
-        whatsappClient = await whatsappChannel.startWhatsApp()
-        providers.whatsapp = (to, text) => whatsappChannel.sendMessage(to, text)
-        whatsappPairRetries = 0
-        // `startWhatsApp()` owns the state transition. In particular, do not
-        // overwrite its later `ready` event with an untrue connecting state.
-      } catch (error) {
-        console.error(`WhatsApp connection could not start: ${error.message}`)
-        await upsertChannelRegistry('whatsapp-office-primary', 'whatsapp_web', 'unhealthy', 1, null, error.message)
-        if (pairingRequested) {
-          whatsappPairRetries += 1
-          if (whatsappPairRetries >= 5) {
-            db.prepare("DELETE FROM settings WHERE key='whatsapp_pair_requested'").run()
-          }
-        }
-      } finally {
-        whatsappStarting = false
       }
     }
   }
@@ -159,14 +85,22 @@ async function main() {
       if (channel !== 'whatsapp') throw new Error('Only WhatsApp test delivery is supported')
       if (!/^\+?[1-9]\d{7,14}$/.test(recipient)) throw new Error('Test recipient must be an E.164 phone number')
       if (!text || text.length > 500) throw new Error('Test message must contain 1–500 characters')
-      if (!providers.whatsapp) throw new Error('WhatsApp is not connected')
+      if (!senderFresh(db, 'wa-sender')) throw new Error('WhatsApp sender service is not running')
 
-      const result = await providers.whatsapp(recipient, text)
+      // Outbox cut-over (Opus5.5 §6.2): the wa-sender process is the only
+      // deliverer, so the test message is queued durably and its later
+      // delivery state lives in notification_outbox, not in this command.
+      queueReal(db, {
+        eventId: `channel-test-${command.id}`,
+        channel,
+        recipient,
+        payload: { text, kind: 'channel_test', commandId: command.id }
+      })
       db.prepare(`UPDATE commands SET status='done',result=?,finished_at=? WHERE id=?`).run(
-        JSON.stringify({ channel, messageId: result.messageId || null }), new Date().toISOString(), command.id
+        JSON.stringify({ channel, queued: true, outboxEventId: `channel-test-${command.id}` }), new Date().toISOString(), command.id
       )
       audit(db, {
-        actorId: command.requested_by || 'system', action: 'channel.test.delivered',
+        actorId: command.requested_by || 'system', action: 'channel.test.queued',
         entityType: 'channel', entityId: channel, details: { commandId: command.id }
       })
     } catch (error) {
@@ -205,12 +139,24 @@ async function main() {
           displayFilename: ''
         }
       }
-      await require('./whatsapp').sendDocument(`${digits}@c.us`, task.pdf_path, details.caption, details.displayFilename)
+      if (!senderFresh(db, 'wa-sender')) throw new Error('WhatsApp sender service is not running')
+      queueReal(db, {
+        eventId: `wake-doc-${command.id}`,
+        channel: 'whatsapp',
+        recipient: `${digits}@c.us`,
+        payload: {
+          kind: 'document',
+          taskId: task.id,
+          pdfPath: task.pdf_path,
+          caption: details.caption,
+          displayFilename: details.displayFilename
+        }
+      })
       db.prepare(`UPDATE commands SET status='done',result=?,finished_at=? WHERE id=?`).run(
-        JSON.stringify({ sent: true, taskId: task.id }), new Date().toISOString(), command.id
+        JSON.stringify({ queued: true, taskId: task.id, outboxEventId: `wake-doc-${command.id}` }), new Date().toISOString(), command.id
       )
       audit(db, {
-        actorId: command.requested_by || 'system', action: 'wake.document.sent',
+        actorId: command.requested_by || 'system', action: 'wake.document.queued',
         entityType: 'task', entityId: task.id, details: { commandId: command.id }
       })
     } catch (error) {
@@ -219,23 +165,34 @@ async function main() {
   }
 
   await syncProviders()
-  const stopEvents = startEventDispatcher(providers, { db })
+  const stopEvents = startEventDispatcher({}, { db })
   const stopServiceHeartbeat = startServiceHeartbeat('channels', {
     db,
     meta: () => ({
-      whatsapp: Boolean(providers.whatsapp),
-      telegram: Boolean(providers.telegram),
-      email: Boolean(providers.email)
+      outbox: outbox.outboxStats(db)
     })
   })
   const dailyDigest = require('./daily-digest')
   let digestBusy = false
   const digestTimer = setInterval(() => {
-    if (digestBusy || !providers.whatsapp) return
+    if (digestBusy || !senderFresh(db, 'wa-sender')) return
     digestBusy = true
+    // Delivery goes through the outbox: the sender process drains these rows.
+    // The per-day event id makes digest reruns on the same day idempotent.
+    const digestRunId = `daily-digest-${new Date().toISOString().slice(0, 10)}`
     dailyDigest.runDailyDigest(db, {
-      sendMessage: (chatId, text) => require('./whatsapp').sendMessage(chatId, text),
-      sendDocument: (chatId, filePath, caption, customFilename) => require('./whatsapp').sendDocument(chatId, filePath, caption, customFilename)
+      sendMessage: (chatId, text) => queueReal(db, {
+        eventId: digestRunId,
+        channel: 'whatsapp',
+        recipient: chatId,
+        payload: { text, kind: 'daily_digest' }
+      }),
+      sendDocument: (chatId, filePath, caption, customFilename) => queueReal(db, {
+        eventId: `${digestRunId}-${path.basename(String(filePath || 'document.pdf'))}`,
+        channel: 'whatsapp',
+        recipient: chatId,
+        payload: { kind: 'document', pdfPath: filePath, caption, displayFilename: customFilename }
+      })
     }).catch((error) => console.error(`Daily digest failed: ${error.message}`))
       .finally(() => { digestBusy = false })
   }, 60000)
@@ -275,17 +232,25 @@ async function main() {
       }
       const subject = `${details.officialTitle}${details.company ? ` — ${details.company}` : ''}`
       const body = details.caption
-      const { sendGmailDocument } = require('./gmail')
-      await sendGmailDocument(recipient, task.pdf_path, {
-        subject,
-        body,
-        filename: details.displayFilename
+      if (!senderFresh(db, 'mailtg-sender')) throw new Error('Email sender service is not running')
+      queueReal(db, {
+        eventId: `wake-doc-email-${command.id}`,
+        channel: 'email',
+        recipient,
+        payload: {
+          kind: 'document_email',
+          taskId: task.id,
+          filePath: task.pdf_path,
+          subject,
+          body,
+          displayFilename: details.displayFilename
+        }
       })
       db.prepare(`UPDATE commands SET status='done',result=?,finished_at=? WHERE id=?`).run(
-        JSON.stringify({ sent: true, taskId: task.id, recipient }), new Date().toISOString(), command.id
+        JSON.stringify({ queued: true, taskId: task.id, recipient, outboxEventId: `wake-doc-email-${command.id}` }), new Date().toISOString(), command.id
       )
       audit(db, {
-        actorId: command.requested_by || 'system', action: 'wake.document.email.sent',
+        actorId: command.requested_by || 'system', action: 'wake.document.email.queued',
         entityType: 'task', entityId: task.id, details: { commandId: command.id, recipient }
       })
     } catch (error) {
@@ -311,10 +276,8 @@ async function main() {
     telegramController?.abort()
     stopGmail?.()
     stopEvents()
-    if (whatsappClient) {
-      try { await whatsappClient.destroy() } catch { /* ignore */ }
-      await upsertChannelRegistry('whatsapp-office-primary', 'whatsapp_web', 'unhealthy', 1, null, 'disconnected')
-    }
+    // The WhatsApp client lives in the wa-sender process now; this worker has
+    // nothing browser-related to close.
     await Promise.allSettled(tasks)
     db.close()
   }

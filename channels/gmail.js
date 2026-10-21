@@ -53,7 +53,7 @@ async function sendGmailDocument(to, filePath, { subject = 'SAPAuto V8 — مس�
   const fs = require('node:fs')
   const path = require('node:path')
   const resolved = path.resolve(filePath)
-  const { localDataRoot } = require('./secure-store')
+  const { localDataRoot } = require('../assistant/paths.cjs')
   const root = path.resolve(localDataRoot())
   const resolvedCmp = process.platform === 'win32' ? resolved.toLowerCase() : resolved
   const rootCmp = process.platform === 'win32' ? root.toLowerCase() : root

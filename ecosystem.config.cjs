@@ -32,12 +32,30 @@ module.exports = {
       name: 'sapauto-v8-channels',
       script: path.join(root, 'channels', 'index.js'),
       env: {
-        SERVICE_NAME: 'channels',
+        SERVICE_NAME: 'channels'
+      }
+    },
+    {
+      ...common,
+      name: 'sapauto-v8-wa-sender',
+      script: path.join(root, 'channels', 'wa-sender.js'),
+      // The WhatsApp client and its Chromium child move to their own app
+      // (Opus5.5 §6.2 senders): a send burst or a hung handshake can no longer
+      // stall polling, and the delivery lease prevents a PM2 restart overlap
+      // from running two clients on one LocalAuth session.
+      env: {
+        SERVICE_NAME: 'wa-sender',
         WHATSAPP_ENABLED: 'true'
       },
-      // WhatsApp runs Chromium in-process today; its ceiling is higher until
-      // the sender is split into its own app.
       max_memory_restart: '900M'
+    },
+    {
+      ...common,
+      name: 'sapauto-v8-mailtg-sender',
+      script: path.join(root, 'channels', 'mailtg-sender.js'),
+      env: {
+        SERVICE_NAME: 'mailtg-sender'
+      }
     },
     {
       ...common,

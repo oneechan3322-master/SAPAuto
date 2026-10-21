@@ -72,6 +72,17 @@ function markFailed(id, message, attempts, db = getDatabase()) {
   return { dead }
 }
 
+/** Release a claimed row back to pending without cost when the transport
+ * itself is unavailable (client offline, credentials not configured). The
+ * claim's attempt increment is reversed so transport outages never count
+ * against the delivery. */
+function defer(id, { seconds = 30, db = getDatabase() } = {}) {
+  db.prepare(`UPDATE notification_outbox
+    SET status = 'pending', attempts = MAX(attempts - 1, 0), next_attempt_at = ?,
+        lease_owner = NULL, lease_until = NULL
+    WHERE id = ?`).run(new Date(Date.now() + seconds * 1000).toISOString(), id)
+}
+
 /** Reset an 'uncertain' or 'dead' row for an explicit operator-triggered resend. */
 function resetForResend(id, db = getDatabase()) {
   return db.prepare(`UPDATE notification_outbox
@@ -127,6 +138,7 @@ module.exports = {
   claim,
   markSent,
   markFailed,
+  defer,
   resetForResend,
   recoverExpiredLeases,
   drain,
