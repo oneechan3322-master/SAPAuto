@@ -14,11 +14,11 @@ const SOURCE_EXTENSIONS = new Set(['.cjs', '.css', '.js', '.jsx', '.json', '.md'
    automation code with its own contract tests; it is excluded from OpenCode
    snapshots so proposals cannot silently rewrite it and so ~600KB of portal
    selectors cannot consume the source budget. */
-const EXCLUDED_DIRECTORIES = new Set(['.git', '.local', '.next', '.venv', 'auth', 'build', 'coverage', 'credentials', 'data', 'dist', 'docs', 'logs', 'models', 'node_modules', 'scratch', 'scraper', 'secrets', 'test', 'tests', 'test-results'])
+const EXCLUDED_DIRECTORIES = new Set(['.git', '.local', '.next', '.venv', 'auth', 'backups', 'build', 'coverage', 'credentials', 'data', 'dist', 'docs', 'logs', 'models', 'node_modules', 'sapauto-backups', 'scratch', 'scraper', 'secrets', 'test', 'tests', 'test-results'])
 /* Planning documents are internal narrative, not source to review. Matched by
    pattern rather than by name: a new plan file must never silently re-enter the
    snapshot budget. */
-const EXCLUDED_FILE_PATTERN = /^(?:plan|readme|changelog|license|agents|codemap|complete-version-analysis|comparison|definition|production-beast-prompt)[^/\\]*\.md$/i
+const EXCLUDED_FILE_PATTERN = /^(?:plan|readme|changelog|license|agents|codemap|complete-version-analysis|comparison|definition|production-beast-prompt|v8|current[_-]session[_-]state|channel-improvements|mistral-error|full-pipeline-test-report)[^/\\]*\.md$/i
 const MAX_SOURCE_BYTES = 1152 * 1024
 const MAX_FILE_BYTES = 56 * 1024
 const MAX_FILES = 400

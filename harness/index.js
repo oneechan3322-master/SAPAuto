@@ -5,6 +5,8 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 const { getDatabase } = require('../db/connect')
 const { runMigrations } = require('../db/migrate')
 const { startHeartbeat } = require('./heartbeat')
+const { startHeartbeat: startServiceHeartbeat } = require('../lib/heartbeat')
+const { startLease } = require('../lib/lease')
 const { startCommandWorker } = require('./commands')
 const { startSchedules } = require('./schedules')
 const { runLoop } = require('./loop')
@@ -13,6 +15,19 @@ const { scanAndIngestAllPdfs } = require('../domain/pdf-scanner.cjs')
 async function main() {
   const db = getDatabase()
   runMigrations(db)
+
+  // Two harness copies must never scan at once (PM2 #6142 restart overlap and
+  // manual starts). The lease is taken before any work begins; a copy that
+  // cannot own it exits without touching accounts.
+  const lease = startLease('harness', {
+    db,
+    onLost: (error) => { console.error(`Harness lease lost: ${error.message}`) }
+  })
+  if (!lease.acquired) {
+    console.error('Another harness instance owns the scan lease; this copy will not start.')
+    return { shutdown: async () => {}, loopPromise: Promise.resolve() }
+  }
+  const stopServiceHeartbeat = startServiceHeartbeat('harness', { db })
 
   // Scan and ingest older and current PDFs with OCR into the database automatically
   try {
@@ -33,8 +48,10 @@ async function main() {
     stopping = true
     controller.abort()
     stopHeartbeat()
+    stopServiceHeartbeat()
     stopCommands()
     stopSchedules()
+    lease.stop()
     await loopPromise
     db.close()
   }
@@ -44,6 +61,8 @@ async function main() {
   })
   process.once('SIGINT', handleSignal)
   process.once('SIGTERM', handleSignal)
+  // Windows PM2 has no real signals; a graceful stop arrives as a message.
+  process.on('message', (message) => { if (message === 'shutdown') handleSignal() })
   return { shutdown, loopPromise }
 }
 

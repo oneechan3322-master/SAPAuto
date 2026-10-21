@@ -8,15 +8,47 @@ This is the living handoff document. No passwords, API keys, cookies, or QR data
 
 | Item | State |
 |---|---|
-| Active project | `C:\Users\Mega Store\Downloads\SapAuto\v8.1` — created 2026-10-20, awaiting first work session |
+| Active project | `C:\Users\Mega Store\Downloads\SapAuto\v8.1` — first work session done 2026-10-21 (Phase 0 + Phase 1 foundation, see session log) |
 | V8 (`..\v8`) | **CLOSED** — commit `ccbb5b4` "Close V8: production-verified final state"; fully locked down (see Lockdown audit below) |
 | All versions (v4–v9) | No version can auto-start anything: PM2 daemon dead + empty dump, Startup hooks disabled, no tasks/services/registry hooks anywhere |
 | PM2 services | **0 running** (was 6 in v8). Nothing is delivering WhatsApp/email/monitoring right now |
 | Dashboard (port 3000) | **Offline** by design until v8.1 goes live with auth |
 | WhatsApp | Session preserved on disk in `..\v8\channels\.wwebjs_auth\` (no re-pair needed later); connected state will expire live delivery until v8.1 brings the channel up |
 | v8.1 dependencies | `npm ci` done: root (375 pkgs) + launcher (282 pkgs), Node 24.13.1 |
-| v8.1 tests | 6/6 pass (db migrations 001–026 apply fresh; channel-unlinked-silence) |
+| v8.1 tests | 202 tests: 195 pass, 0 fail, 7 skipped (2026-10-21, `node --test test/*.test.js`) |
 | Upgrade plan | `PLAN.md` (= `Opus5.5.txt`, 744 lines) — the full V8→V8.1 engineering plan |
+
+## Session log — 2026-10-21 (ZCode): Phase 0 + Phase 1 foundation
+
+### Phase 0 (emergency) — done here
+- **Production DB backed up**: `C:\sapauto-backups\sapauto-2026-10-21T07-00-14.db` + manifest (sha256 `b5253d63…`, `integrity_check` ok, 0 FK violations, 26 companies / 800 obligations / 942 payments) and copied to `X:\sapauto-backups\`.
+- **ACLs locked**: `..\v8\channels\.wwebjs_auth` and `..\SAPAuto3\accounts.txt` now grant only `Mega Store`, `SYSTEM`, `Administrators` (inherited ACEs for other SIDs and `CodexSandboxUsers` removed).
+- **Secret scan clean**: no live `sk-*`/`re_*`/bot-token/Mistral keys in v8, v8.1, workspace docs, or old PM2 logs (matches are test fixtures/CSS class names in other projects).
+- **Restart diagnosis**: old dump shows launcher 20 restarts (exit 1) and channels 7 restarts; channels error log matches plan C2 exactly (`Protocol error (Runtime.callFunctionOn): Execution context was destroyed`, `EBUSY`, detached frame) — WhatsApp crash killed Gmail/Telegram with it. No `watch: true` was set.
+- **Launcher bound to loopback**: `ecosystem.config.cjs` now runs `next start --hostname 127.0.0.1`; revert note is inline.
+- **Still owner-only**: firewall rule needs elevation (`netsh … requires elevation`); Mistral/Resend key revocation; WhatsApp linked-device review.
+
+### Phase 1 (stability) — foundation done here
+- `db/migrate.js` (checksum ledger) and `db/connect.js` (pragma policy) were finished by a **concurrent writer** (another agent, see note below) — verified here on a copy of the production DB: 027–032 apply, checksums backfill for all rows, second run is a no-op, edited-after-apply is detected.
+- **Fixed in that work**: `029_hot_indexes.sql` indexed `payments(account_key, deadline)`; the column is `due_date`, so migration 029 aborted. Corrected.
+- New modules: `lib/logger.js` (pino + redaction; file logs only when `SERVICE_NAME`/`V8_LOG_FILE=1` so tests stay clean), `lib/lease.js` (single-instance `service_locks` lease with renewal), `lib/shutdown.js` (PM2 `shutdown_with_message` + signal handling), `lib/heartbeat.js` (`service_status` writer), `channels/outbox.js` (enqueue/claim/lease/backoff/dead/uncertain/resend/stats).
+- **Outbox shadow mode**: `deliverEvent` records every would-be delivery as a shadow row (`outbox_mode` setting, default `shadow`, set to `off` to disable). Shadow rows are never claimable (`shadow = 0` filter), so a later cut-over cannot replay them as real messages. Migration `032_outbox_shadow.sql` adds the flag.
+- **`/health`**: `launcher/app/api/health/route.js` reports per-service heartbeat age and outbox backlog/dead/uncertain; 503 when stale > 180 s, dead > 0, or oldest backlog > 900 s.
+- **Wiring**: harness takes the `harness` lease before any work and refuses to start as a second copy; harness, channels, assistant, and mcp write `service_status` heartbeats and honour PM2's shutdown message. `ecosystem.config.cjs` hardened: `watch: false`, `shutdown_with_message: true`, `kill_timeout: 30 s`, memory caps, `SERVICE_NAME` per app, launcher on 127.0.0.1.
+- **Repo hygiene**: the 37 MB `sapauto-backups/v8-data-final-2026-10-20/` client-data copy was moved out of the tree to `C:\sapauto-backups\`; `.gitignore` now also covers `sapauto-backups/`, `backups/`, `logs/`; `code-proposals.js` excludes backup dirs and narrative docs from the OpenCode snapshot budget.
+
+### Verification
+- Migration upgrade path tested against a copy of the production DB (not the original).
+- Full suite: **202 tests, 195 pass, 0 fail, 7 skipped**. Test fixes included: `slice-4-1` called `getChannelStatus` without a db (created a stray empty DB), `db.test.js` hard-coded the migration count, and the OpenCode snapshot budget was exceeded by narrative docs — now pattern-excluded.
+
+### Next in sequence (plan Phase 1 → 2)
+1. Split `channels` into dispatcher + `wa-sender` + `mailtg-sender`; run the outbox in shadow for ~3 days, compare counts, then cut over (`outbox_mode` → live).
+2. Migrate remaining `console.*` call sites to `lib/logger.js` and scrub old PM2 logs.
+3. Owner actions: firewall rule restriction (elevation), key revocation, WhatsApp device review, PM2 boot task + BIOS "restore on AC power loss" + UPS.
+4. Before copying v8's `data/` in: delete any test-generated `data/accounts.key` — a run of the test suite creates one and it would shadow the real key if only the DB is copied.
+
+### Concurrent-writer note
+v8.1 was being edited by a second agent during this session (migrations 027–031, `db/connect.js`, `db/migrate.js` appeared at 10:17 while work was in progress; the in-repo `sapauto-backups/` copy and a fresh `data/accounts.key` came from that session too). Nothing is committed: the working tree holds both agents' changes. Re-read any file before editing it, and do not `git checkout`/`stash` the tree.
 
 ## What was done in the seeding session (2026-10-20)
 

@@ -130,7 +130,9 @@ test('slice 4.1: getChannelStatus returns registry state', (t) => {
   assert.equal(status.status, 'unconfigured')
   assert.equal(status.draftOnly, true)
 
-  assert.equal(getChannelStatus('nonexistent'), null)
+  // Must pass the test database explicitly: the default singleton would open
+  // the real data/sapauto.db from a test process.
+  assert.equal(getChannelStatus('nonexistent', db), null)
 })
 
 test('slice 4.1: createDraft requires channel and contact', (t) => {

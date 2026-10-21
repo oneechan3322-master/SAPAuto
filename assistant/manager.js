@@ -6,6 +6,7 @@ const { getDatabase } = require('../db/connect')
 const { runMigrations } = require('../db/migrate')
 const { runAttentionCycle } = require('./monitor')
 const visor = require('./pdf-visor.cjs')
+const { startHeartbeat: startServiceHeartbeat } = require('../lib/heartbeat')
 
 function startAssistantManager({ db = getDatabase(), intervalMs = Number(process.env.V8_ASSISTANT_MANAGER_INTERVAL_MS || 30000), signal } = {}) {
   if (!Number.isInteger(intervalMs) || intervalMs < 5000 || intervalMs > 300000) {
@@ -80,13 +81,20 @@ function main() {
   runMigrations(db)
   const controller = new AbortController()
   const stop = startAssistantManager({ db, signal: controller.signal })
+  const stopServiceHeartbeat = startServiceHeartbeat('assistant', { db })
+  let stopping = false
   const shutdown = () => {
+    if (stopping) return
+    stopping = true
     controller.abort()
     stop()
+    stopServiceHeartbeat()
     db.close()
   }
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
+  // Windows PM2 has no real signals; a graceful stop arrives as a message.
+  process.on('message', (message) => { if (message === 'shutdown') shutdown() })
   return { shutdown }
 }
 

@@ -16,7 +16,9 @@ test('migrations apply once and create the planned tables', (t) => {
     fs.rmSync(directory, { recursive: true, force: true })
   })
 
-  assert.equal(runMigrations(db).length, 26)
+  const migrationsDirectory = path.join(__dirname, '..', 'db', 'migrations')
+  const migrationCount = fs.readdirSync(migrationsDirectory).filter((file) => /^\d+_.+\.sql$/.test(file)).length
+  assert.equal(runMigrations(db).length, migrationCount)
   assert.deepEqual(runMigrations(db), [])
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
     .all().map((row) => row.name)

@@ -10,6 +10,33 @@ function messageMode(db = getDatabase()) {
   return row ? row.value : 'dry-run'
 }
 
+// Outbox shadow phase (Opus5.5 §6.2): while the legacy direct-send path stays
+// authoritative, every would-be delivery is also recorded in
+// notification_outbox. Shadow rows are never claimed by a sender, so they can
+// never be replayed as real messages after cut-over. Setting `outbox_mode` to
+// anything but 'shadow' turns the recording off; 'live' cut-over only becomes
+// meaningful once the transport senders exist and is deliberately not wired here.
+function outboxShadowEnabled(db) {
+  const row = db.prepare("SELECT value FROM settings WHERE key='outbox_mode'").get()
+  return (row ? row.value : 'shadow') === 'shadow'
+}
+
+function recordOutboxShadow(event, link, text, db) {
+  try {
+    const { enqueue } = require('./outbox')
+    enqueue({
+      eventId: event.id,
+      channel: link.channel,
+      recipient: link.external_id,
+      payload: { text, kind: event.kind, accountKey: event.account_key || null },
+      shadow: true
+    }, db)
+  } catch (error) {
+    // Shadow recording must never break real delivery.
+    console.error(`Outbox shadow record failed for event ${event.id}: ${error.message}`)
+  }
+}
+
 // Only these kinds may be coalesced into one grouped wake message. Kinds with
 // side effects (reminder_due, report_requested) always go through
 // deliverEvent individually.
@@ -162,6 +189,7 @@ async function deliverEvent(event, providers, db = getDatabase()) {
     }
   }
   let eligible = 0
+  const shadowEnabled = outboxShadowEnabled(db)
   for (const link of links) {
     if (!providers[link.channel]) continue
     if (event.kind === 'report_requested' &&
@@ -171,6 +199,7 @@ async function deliverEvent(event, providers, db = getDatabase()) {
       .get(event.id, link.channel, link.external_id)
     if (exists) continue
     if (!text) throw new Error(`No message body for ${event.kind}`)
+    if (shadowEnabled) recordOutboxShadow(event, link, text, db)
     const isWakeTarget = link.channel === 'whatsapp' &&
       link.external_id === `${controlNumber.replace(/^\+/, '')}@c.us` && wakeEnabled
     const mode = isWakeTarget || messageMode(db) === 'live' ? 'sent' : 'dry_run'

@@ -150,13 +150,16 @@ async function main() {
   const db = getDatabase()
   runMigrations(db)
   const instance = await startMcpServer({ db })
+  const stopServiceHeartbeat = require('../lib/heartbeat').startHeartbeat('mcp', { db })
   console.log(`SAPAuto MCP listening on ${process.env.V8_MCP_HOST || '127.0.0.1'}:${process.env.V8_MCP_PORT || 3101}`)
   const shutdown = () => instance.close().then(() => db.close()).catch((error) => {
     console.error(`MCP shutdown failed: ${error.message}`)
     process.exitCode = 1
-  })
+  }).finally(() => stopServiceHeartbeat())
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
+  // Windows PM2 has no real signals; a graceful stop arrives as a message.
+  process.on('message', (message) => { if (message === 'shutdown') shutdown() })
 }
 
 if (require.main === module) main().catch((error) => {

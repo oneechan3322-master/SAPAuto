@@ -10,6 +10,7 @@ const { startEventDispatcher } = require('./events')
 const secureStore = require('./secure-store')
 const { getChannelStatus } = require('../domain/channel-broker.cjs')
 const { audit } = require('../db/queries/shared')
+const { startHeartbeat: startServiceHeartbeat } = require('../lib/heartbeat')
 
 async function main() {
   const db = getDatabase()
@@ -219,6 +220,14 @@ async function main() {
 
   await syncProviders()
   const stopEvents = startEventDispatcher(providers, { db })
+  const stopServiceHeartbeat = startServiceHeartbeat('channels', {
+    db,
+    meta: () => ({
+      whatsapp: Boolean(providers.whatsapp),
+      telegram: Boolean(providers.telegram),
+      email: Boolean(providers.email)
+    })
+  })
   const dailyDigest = require('./daily-digest')
   let digestBusy = false
   const digestTimer = setInterval(() => {
@@ -290,11 +299,15 @@ async function main() {
     processOneWakeDocumentEmail().catch((error) => console.error(`Wake document email dispatch failed: ${error.message}`))
   }, 1000)
   testDeliveryTimer.unref()
+  let shuttingDown = false
   const shutdown = async () => {
+    if (shuttingDown) return
+    shuttingDown = true
     controller.abort()
     clearInterval(syncTimer)
     clearInterval(testDeliveryTimer)
     clearInterval(digestTimer)
+    stopServiceHeartbeat()
     telegramController?.abort()
     stopGmail?.()
     stopEvents()
@@ -311,6 +324,8 @@ async function main() {
   })
   process.once('SIGINT', handleSignal)
   process.once('SIGTERM', handleSignal)
+  // Windows PM2 has no real signals; a graceful stop arrives as a message.
+  process.on('message', (message) => { if (message === 'shutdown') handleSignal() })
   return { shutdown }
 }
 

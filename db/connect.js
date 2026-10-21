@@ -17,8 +17,11 @@ function openDatabase(filePath = resolveDatabasePath()) {
   fs.mkdirSync(path.dirname(resolved), { recursive: true })
   const db = new Database(resolved, { timeout: 5000 })
   db.pragma('journal_mode = WAL')
-  db.pragma('busy_timeout = 5000')
+  db.pragma('synchronous = NORMAL')
   db.pragma('foreign_keys = ON')
+  db.pragma('busy_timeout = 5000')
+  db.pragma('temp_store = MEMORY')
+  db.pragma('wal_autocheckpoint = 1000')
   return db
 }
 
@@ -27,4 +30,19 @@ function getDatabase() {
   return singleton
 }
 
-module.exports = { getDatabase, openDatabase, resolveDatabasePath }
+/** Write transaction that grabs the write lock up front (avoids BUSY lock upgrades). */
+function writeTx(fn, db = getDatabase()) {
+  return db.transaction(fn).immediate()
+}
+
+function checkpointDb() {
+  if (!singleton || !singleton.open) return
+  try { singleton.pragma('wal_checkpoint(TRUNCATE)'); } catch { }
+}
+
+function closeDatabase() {
+  if (!singleton || !singleton.open) return
+  try { checkpointDb(); } finally { singleton.close(); singleton = null; }
+}
+
+module.exports = { getDatabase, openDatabase, resolveDatabasePath, writeTx, checkpointDb, closeDatabase }

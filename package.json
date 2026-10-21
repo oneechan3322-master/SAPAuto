@@ -1,32 +1,34 @@
 {
-    "name":  "sapauto-v8",
-    "version":  "8.0.0",
-    "private":  true,
-    "description":  "Local SAPAuto mission-control host, harness, assistant, and channels",
-    "main":  "harness/index.js",
-    "scripts":  {
-                    "db:migrate":  "node db/migrate.js",
-                    "import:accounts":  "node harness/import-accounts.js",
-                    "start:harness":  "node harness/index.js",
-                    "start:channels":  "node channels/index.js",
-                    "start:assistant":  "node assistant/manager.js",
-                    "start:mcp":  "node mcp/server.js",
-                    "test":  "node --test test/*.test.js",
-                    "update:state":  "node update-session-state.js"
-                },
-    "engines":  {
-                    "node":  "\u003e=24"
-                },
-    "dependencies":  {
-                         "@modelcontextprotocol/sdk":  "^1.32.1",
-                         "better-sqlite3":  "^12.11.1",
-                         "dotenv":  "^16.4.7",
-                         "imapflow":  "^1.0.181",
-                         "mailparser":  "^3.9.38",
-                         "nodemailer":  "^10.1.0",
-                         "pdfjs-dist":  "^3.11.174",
-                         "playwright":  "^1.63.0",
-                         "qrcode":  "^1.5.4",
-                         "whatsapp-web.js":  "^1.34.7"
-                     }
+    "name": "sapauto-v8",
+    "version": "8.0.0",
+    "private": true,
+    "description": "Local SAPAuto mission-control host, harness, assistant, and channels",
+    "main": "harness/index.js",
+    "scripts": {
+        "db:migrate": "node db/migrate.js",
+        "import:accounts": "node harness/import-accounts.js",
+        "start:harness": "node harness/index.js",
+        "start:channels": "node channels/index.js",
+        "start:assistant": "node assistant/manager.js",
+        "start:mcp": "node mcp/server.js",
+        "test": "node --test test/*.test.js",
+        "update:state": "node update-session-state.js"
+    },
+    "engines": {
+        "node": ">=24"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.32.1",
+        "better-sqlite3": "^12.11.1",
+        "dotenv": "^16.4.7",
+        "imapflow": "^1.0.181",
+        "mailparser": "^3.9.38",
+        "nodemailer": "^10.1.0",
+        "pdfjs-dist": "^3.11.174",
+        "pino": "^10.4.0",
+        "pino-roll": "^4.0.0",
+        "playwright": "^1.63.0",
+        "qrcode": "^1.5.4",
+        "whatsapp-web.js": "^1.34.7"
+    }
 }

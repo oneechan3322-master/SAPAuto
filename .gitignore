@@ -29,3 +29,9 @@ data/*.csv
 data/atomic-contract-*.json
 data/payroll.json
 data/tasks.json
+
+# Backups and service logs live outside version control (Opus5.5 §6.9).
+# Backups belong to C:\sapauto-backups, not to the repo tree.
+sapauto-backups/
+backups/
+logs/
