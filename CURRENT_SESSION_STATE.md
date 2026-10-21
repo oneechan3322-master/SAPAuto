@@ -1,174 +1,105 @@
-# SAPAuto V8 — CLOSED (final state)
+# SAPAuto V8.1 — Current Session State
 
-**Closed: 20 October 2026, 04:52 Africa/Cairo.** V8 is closed as the active working version. Development continues at `C:\Users\Mega Store\Downloads\SapAuto\v8.1`, seeded from this codebase and driven by the upgrade plan `Opus5.5.txt` (also copied there as `PLAN.md`).
+Last updated: 20 October 2026, ~05:05 Africa/Cairo
 
-Closure actions performed (2026-10-20):
+This is the living handoff document. No passwords, API keys, cookies, or QR data live here.
 
-- All 6 PM2 services stopped, then deleted from the PM2 process list; PM2 daemon killed. `pm2 save` dump is empty — `pm2 resurrect` restores nothing.
-- WhatsApp session (`channels/.wwebjs_auth/`) preserved on disk, untouched — restarting v8 later does NOT require re-pairing/QR as long as the phone has not signed out the linked device.
-- Auto-start hook disabled: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\SAPAutoV8.bat` (ran `pm2 resurrect` from the v8 folder on every logon) renamed to `SAPAutoV8.bat.CLOSED-2026-10-20.disabled`. Rename it back to re-enable v8 auto-start.
-- Dashboard (port 3000) is now offline by design until v8.1 starts.
-- Production data (SQLite DB, `data/`, PDFs, WhatsApp session) intentionally NOT copied to v8.1 — migrate manually when v8.1 is ready (per Opus5.5 §5.3 with a fresh `npm ci`).
-- **Security follow-ups from Opus5.5 Phase 0**: revoke and rotate the two Mistral keys (full keys were found stored in `MISTRAL-ERROR-FIX.md` — redacted in this commit; keys now exist only in `.env`, which is git-ignored) and the Resend key; restrict the TCP-3000 firewall rule to known Radmin peer IPs, or bind the launcher to 127.0.0.1, until v8.1 ships dashboard auth (plan S1/S5).
+## Current status at a glance
 
-Last operational state: 19 October 2026, 21:15 Africa/Cairo (post-live-delivery-verification). What follows is the final verified handoff for the record:
+| Item | State |
+|---|---|
+| Active project | `C:\Users\Mega Store\Downloads\SapAuto\v8.1` — created 2026-10-20, awaiting first work session |
+| V8 (`..\v8`) | **CLOSED** — commit `ccbb5b4` "Close V8: production-verified final state"; fully locked down (see Lockdown audit below) |
+| All versions (v4–v9) | No version can auto-start anything: PM2 daemon dead + empty dump, Startup hooks disabled, no tasks/services/registry hooks anywhere |
+| PM2 services | **0 running** (was 6 in v8). Nothing is delivering WhatsApp/email/monitoring right now |
+| Dashboard (port 3000) | **Offline** by design until v8.1 goes live with auth |
+| WhatsApp | Session preserved on disk in `..\v8\channels\.wwebjs_auth\` (no re-pair needed later); connected state will expire live delivery until v8.1 brings the channel up |
+| v8.1 dependencies | `npm ci` done: root (375 pkgs) + launcher (282 pkgs), Node 24.13.1 |
+| v8.1 tests | 6/6 pass (db migrations 001–026 apply fresh; channel-unlinked-silence) |
+| Upgrade plan | `PLAN.md` (= `Opus5.5.txt`, 744 lines) — the full V8→V8.1 engineering plan |
 
-## Purpose
+## What was done in the seeding session (2026-10-20)
 
-This is a factual handoff for the next session. It contains no passwords, API keys, cookies, or QR data.
+1. v8 committed final state (`ccbb5b4`, 236 files) after redacting leaked Mistral/Resend keys from `MISTRAL-ERROR-FIX.md`, `scratch/test_mistral_ocr.js`, and the session-state doc.
+2. `.gitignore` hardened: WhatsApp session dirs + backups, `__pycache__`, client data (payroll CSV/JSON, atomic contracts, diag screenshots) never enter git.
+3. All 6 PM2 services stopped → deleted from list → daemon killed. Startup auto-resurrect bat disabled (renamed `SAPAutoV8.bat.CLOSED-2026-10-20.disabled`).
+4. **Lockdown audit** (details in `..\v8\CURRENT_SESSION_STATE.md`): killed a live stray `cmd.exe` running v8's `start-server.bat`, renamed `~/.pm2/dump.pm2`(bak) so `pm2 resurrect` restores nothing, verified clean: startup folders, Run/RunOnce keys (HKCU/HKLM/Wow6432), Winlogon defaults, all scheduled tasks by action path, Windows services, port listeners (3000/7799 off), stray node/python/chrome processes.
+5. v8.1 created via robocopy from v8 @ `ccbb5b4` (1354 files / 155 MB, `.git` included for lineage). Excluded: `node_modules/`, `data/` (production DB + PDFs), `channels/.wwebjs_auth/`(+backups), `launcher/.next/`, caches.
+6. Seeded `PLAN.md` + this file. `npm ci` root & launcher. Migration smoke test passed.
 
-## Project and local services
+## Re-enabling v8 (only if ever needed again — NOT recommended)
 
-- Project root: `C:\Users\Mega Store\Downloads\SapAuto\v8`
-- Dashboard access:
-  - Local: `http://127.0.0.1:3000`
-  - Local Wi-Fi (LAN): `http://192.168.1.111:3000` (Interface: `Wi-Fi`, Profile: `Private`)
-  - Remote (Radmin VPN): `http://26.182.57.137:3000` (Interface: `Radmin VPN`, Profile: `Private`)
-- Server binding: `0.0.0.0:3000` (listening across all network interfaces)
-- Windows Firewall: Inbound rule `SapAuto V8 Launcher (TCP 3000)` active (`Protocol: TCP`, `Port: 3000`, `Action: Allow`, `Profile: Private`).
-- All 6 PM2 services **online** (verified at 21:15 Africa/Cairo):
-  - `sapauto-v8-channels` (id 1): online — restart count 12, event dispatcher active (10s cycle)
-  - `sapauto-v8-assistant` (id 2): online — restart count 5, Mistral key rotation working
-  - `sapauto-v8-harness` (id 0): online — restart count 1, full pipeline verified with Thenile14
-  - `sapauto-v8-launcher` (id 5): online — restart count 21, Next.js production build, port 3000
-  - `sapauto-v8-local-model` (id 3): online — restart count 0
-  - `sapauto-v8-mcp` (id 4): online — restart count 0
+1. Delete `data/` inquiries: start from v8 folder.
+2. Rename Startup bat back: `SAPAutoV8.bat.CLOSED-2026-10-20.disabled` → `SAPAutoV8.bat`.
+3. Restore dumper if wanted: `~/.pm2/dump.pm2.CLOSED-2026-10-20.bak` → `dump.pm2`, or just run `pm2 start ecosystem.config.cjs` (via `START.bat`).
+4. WhatsApp re-pair NOT needed (session intact on disk) unless the phone signed out the linked device.
 
-## Channels: WhatsApp & Email Delivery — LIVE & VERIFIED ✅
+---
 
-### WhatsApp Live Status (Production-Ready)
-- **Status**: **متصلة ومتحقق منها (connected & delivering)**.
-- **Account Number**: `+201205147906` (authenticated live session confirmed).
-- **Control Number**: `+201126170117` (`201126170117@c.us`) — receiving live notifications.
-- **Channel Registry**: `status: connected`, `last_heartbeat_at: 2026-10-19T21:10:09.675Z`, `last_error: null`.
-- **Message Mode**: **LIVE** (database setting: `message_mode = 'live'`, updated 2026-10-19T21:09:22.857Z).
-- **Wake Notifications**: **ENABLED** (`whatsapp_wake_notifications = 'true'`).
-- **Event Dispatcher**: Running on 10-second intervals in `channels/index.js` via `startEventDispatcher()`.
-- **Delivery Confirmation**: Test event delivered successfully 2026-10-19T21:12:06.162Z to control number.
-- **Total Deliveries**: 17 sent successfully (all status: 'sent').
-- **Reconnect**: Session restores automatically from `.wwebjs_auth/session/` Chromium browser profile on PM2 restart — no QR re-scan needed as long as the user has NOT signed out of WhatsApp on the phone.
-- **UI Resolution**:
-  - Added "إدارة القناة ⚙" button on the connected WhatsApp card so the user can manage or disconnect without being trapped in a stale pairing modal.
-  - Stale `pairingRequested` flag is cleared automatically on the `ready` event — no manual DB intervention needed.
-- **Delivery confirmation**: `sendMessage()` throws `Error('WhatsApp did not confirm the test delivery')` if `client.sendMessage()` returns falsy — no silent failures.
-- **Path normalization**: Windows case-insensitive root check active.
-- **Dedicated Stable Browser**: WhatsApp Web is now explicitly bound to the stable, dedicated Playwright Chromium executable (`%LOCALAPPDATA%\ms-playwright\chromium-1246\chrome-win64\chrome.exe`) rather than relying on default system Google Chrome which can update in the background or conflict with user browsing sessions.
-- **Deadline Ordering Fix**: `latestNews()` in `channels/whatsapp-intents.js` now filters and prioritizes upcoming tasks (`deadline >= today` in `Africa/Cairo` time zone), so current October 2026 deadlines appear first instead of old overdue deadlines from 2025.
-- **PDF Request Dispatch Fix**: When user texts `pdf` or asks for a document via WhatsApp, `handleIntent()` now directly finds and dispatches the actual PDF file(s) via `sendDocument()` with official metadata, avoiding the canned prompt "أرسل ملف PDF في نفس الرسالة مع عبارة اقرأ هذا PDF".
-- **Periodic System Check (OpenCode)**: The assistant background manager (`assistant/manager.js`) now runs a periodic probe (`probe('system_adviser')`) to ensure OpenCode / system adviser readiness and database state remain valid continuously.
+## TASKS — v8.1 plan (start whenever you have free time)
 
-### Email Delivery (Resend API)
-- **Status**: **Configured & Ready** (not active for event notifications).
-- **Provider**: Resend API (tested successfully: message ID `01a155e9-3b2c-7912-9ec4-b3b790e77815`).
-- **Sender**: `onboarding@resend.dev`
-- **Recipient**: `ramygalal235@gmail.com`
-- **API Keys**: Rotation supported (`RESEND_API_KEYS` array in `.env`).
-- **Note**: Email channel not configured for automated event delivery (no `user_channels` records). Resend used for manual sends and testing only.
+> Recommended rhythm: Phase 0 = 1 focused session (~1–2 h, do it before going live again). Phases 1–5 are week-scale slices; each phase's first task can ship alone.
 
-### Gmail OAuth Integration
-- **Status**: **Specification Created** (implementation pending, estimated 2 hours).
-- **Requirements**: Google Cloud Console setup (CLIENT_ID, CLIENT_SECRET), OAuth flow in `channels/gmail.js`.
-- **Current Gmail**: Basic IMAP/SMTP with app password (not used for notifications).
+### Phase 0 — Emergency fixes (FIRST session, ~1–2 h, do NOT skip)
+- [ ] **Revoke + rotate the 2 Mistral keys** (they sat in plaintext docs/logs; leaked full keys were redacted in commit `ccbb5b4`). Enter new keys only in `.env` / DPAPI never in docs.
+- [ ] **Revoke + rotate the Resend key** (`re_…` leaked in the old session-state doc; redacted now).
+- [ ] **Restrict the `SapAuto V8 Launcher (TCP 3000)` firewall rule** to known Radmin peer IPs — or bind launcher to `127.0.0.1` — until dashboard auth ships (plan S1, CVSS 8.8).
+- [ ] **Backup v8's production DB** (`..\v8\data\sapauto.db`) with `integrity_check` and copy to a second disk. This backup is the migration source for v8.1 data later (plan C4, §6.9).
+- [ ] **Review WhatsApp linked devices from the phone**; "log out all devices" if anything unfamiliar (plan S3, QR was shown on a call).
+- [ ] **Lock file ACLs**: `icacls` on `..\v8\channels\.wwebjs_auth\` and `..\SAPAuto3\accounts.txt` so only your user can read them (plan S2/S3).
+- [ ] **Diagnose the ~20/week restarts**: `pm2 describe sapauto-v8-launcher`… (from the backup dump if needed) — check `watch: true` in `ecosystem.config.cjs`, `next dev` vs `build+start`, and memory growth (plan §6.7 note).
 
-### Event Delivery System
-- **Total Events**: 1,717 generated (1,649 announced, 68 unannounced).
-- **Delivery Mechanism**:
-  - **Wake Notifications**: Operational events sent to control number when `whatsapp_wake_notifications=true` and `message_mode=live`.
-  - **User Channels**: Currently 0 configured (no `user_channels` records). Events only deliver to control number.
-  - **Batchable Event Types**: `new_doc`, `changed_doc`, `deadline_reminder`, `assistant_attention`, `account_parked`, `harness_offline`.
-  - **Batching Logic**: Groups 5+ batchable events into single digest message to prevent notification spam.
-- **Unannounced Events (68)**:
-  - 59 × `pdf_studied` (informational, not configured for delivery)
-  - 3 × `removed_doc` (informational)
-  - 3 × `cycle_interrupted` (informational)
-  - 2 × `assistant_attention` (pending next delivery cycle)
-  - 1 × `harness_offline` (pending)
+### Phase 1 — Stability (weeks 1–2, plan §6)
+- [ ] Shared `db/connection.js` with pragmas (WAL, busy_timeout 5000, FK ON **after** `PRAGMA foreign_key_check` passes) — switch all services to it (§6.1).
+- [ ] Migration runner + `schema_migrations` checksum ledger; `--baseline` backfill for migrations 001–026; every service refuses to start on unknown schema state (§6.8).
+- [ ] Nightly backup job (`scripts/backup.js`, Task Scheduler 02:30) with integrity check + monthly restore drill; copy `data/` + `.wwebjs_auth/` + DPAPI blobs offline (§6.9).
+- [ ] pino + pino-roll structured logging with `redact` list; scrub old PM2 logs; migrate all `console.*` (§6.4).
+- [ ] Graceful shutdown (`lib/shutdown.js`) with `shutdown_with_message` + single-instance SQLite lease to defeat PM2 #6142 double-spawn (§6.7).
+- [ ] **Transactional outbox** `notification_outbox` (migration 027) with claim/lease/idempotency/backoff/dead-letter; run in shadow mode 3 days, compare counts, then cut over (§5.5, §6.2).
+- [ ] **Isolated WhatsApp sender** — own PM2 app `sapauto-v8-wa` draining outbox rows only; unhandledRejection guard for Puppeteer teardown; exponential reconnect (§6.3). Email/Telegram must survive a WhatsApp crash (plan C2).
+- [ ] `/health` endpoint reporting service heartbeats + outbox backlog; point Uptime Kuma (2nd LAN machine) or a healthchecks.io dead-man switch at it; alerts alternate channel ≠ WhatsApp (§6.12, plan C1).
+- [ ] Task Scheduler boot task `pm2 resurrect` + BIOS "Restore on AC = On" + UPS (§13 Phase 0).
 
-### AI Assistant & Mistral Configuration
-- **Mistral API Key Rotation**: **Implemented & Working** (`assistant/model.js` line ~68).
-- **Keys Configured**: 2 keys in `MISTRAL_API_KEYS` array (both rate-limited at time of testing).
-- **Fallback Behavior**: Automatic rotation on HTTP 429, graceful degradation when all keys exhausted.
-- **Model**: `mistral-small-latest`
-- **Cloud AI**: Allowed (`AI_ALLOW_CLOUD=true`) as fallback when local models timeout.
-- **Recommendation**: Add more Mistral API keys to `MISTRAL_API_KEYS` array for extended rate limit capacity.
+### Phase 2 — Security (weeks 3–4, plan §5.6, §6.6)
+- [ ] Import 26 ETA credentials into DPAPI secure store; delete/rotate any that were exposed; cut the `SAPAuto3/accounts.txt` dependency (plan S2).
+- [ ] Dashboard local auth: users table (argon2id), roles owner/operator/viewer, iron-session cookie, Next middleware guard, TOTP 2FA for owner actions, login rate-limit 5/15min, audit log table (§6.6).
+- [ ] Caddy TLS for LAN/VPN with internal CA (bind Next to 127.0.0.1; firewall 443 → specific Radmin peer IPs).
+- [ ] MCP: least-privilege tools (read-only default), bearer token in DPAPI, two-version rotation acceptance (plan S4, Q14).
+- [ ] BitLocker on the data drive; rotate any still-live keys; PDPL compliance review with counsel (Decree 816/2025).
 
-## System Adviser: OpenCode (Verified in Production)
+### Phase 3 — Scale & performance (weeks 5–7, plan §4, §6.5, §6.10)
+- [ ] `scan_runs` metrics table (migration 030) + per-section content-hash checks feeding risk scheduler (§5.5).
+- [ ] Harness pool: `mapPool` + global TokenBucket ~1 req/s + jitter; concurrency 1 → 2 → 3 with a week of metrics in between; automatic `slowDown` on 429/5xx (§6.5).
+- [ ] ETA session reuse per account (Playwright storageState encrypted via DPAPI) — biggest per-scan win (§4).
+- [ ] Block image/font/media requests; replace every `waitForTimeout` with selector/response waits (§4, grep audit §9.2).
+- [ ] Risk-based scheduling: high-risk accounts ≤ 15 min, quiet ones 2–4 h; response-hash skip; delta scans (§4).
+- [ ] Obligation state machine: `absent_scan_streak` + `review_state` (migration 028); manual review queue on dashboard; daily escalation with penalty estimate for past-60-day-band tasks (plan C5, migration 028).
+- [ ] Hot indexes (migration 029); N+1 cleanup on dashboard aggregates; events/deliveries 180-day archive via ATTACH (§5.5).
+- [ ] User channel management UI + verification codes; Telegram as the scalable free channel (§11 Q11).
 
-- **Status**: **جاهز للمقترحات (configured: true, ready)**.
-- **Binary**: `C:\Users\Mega Store\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe` (v1.19.3).
-- **Model**: `openrouter/free` — OpenRouter's built-in free-model router; auto-selects the best available free model without manual updates as free providers change over time.
-- **Auth File**: `C:\Users\Mega Store\.local\share\opencode\auth.json` (OpenRouter configured).
-- **Regex fix** (`assistant/code-proposals.js`): `configuredModel` validation regex changed from `/^[\w.-]+\/[\w.:-]+$/` to `/^[\w.-]+(?:\/[\w.:-]+)+$/` — now accepts multi-segment model IDs like `openrouter/google/gemma-4-31b-it:free`.
-- **Snapshot budget**: `MAX_SOURCE_BYTES` = 1152 KB; `docs/` and `scratch/` excluded from snapshot; `.bat`/`.html` removed from source extensions; `production-beast-prompt` excluded by file-pattern filter.
-- **Control**: Toggle "تفعيل طلبات المقترحات" enabled and responsive; privacy boundary enforced (source code only — no production DB or client files).
+### Phase 4 — AI (weeks 8–10, plan §6.11, §6.10, §7)
+- [ ] Swap Flask llama-cpp-python wrapper for `llama-server` behind the same 127.0.0.1:7799 (§5.2); prompt cache on.
+- [ ] LLM router: local-first with circuit breakers, `sensitivity='client'` → local only; deadline/penalty alerts NEVER depend on an LLM (rules engine) (§6.11).
+- [ ] Extract rules engine from assistant into deterministic, tested code (`rules/`); LLM only summarises/classifies (§5.2).
+- [ ] JSON-schema-constrained extraction + zod validation; golden eval set (50 real docs) wired to `npm run eval` (§7).
+- [ ] Arabic PDF text repair pre-OCR: NFKC + harakat strip + line reordering with known-words scoring; store `ocr_text_raw` + folded `search_text`; OCR only `needsOcr` pages (§6.10).
+- [ ] FTS5 index on `search_text`; sqlite-vec only if keyword search proves insufficient (§11 Q8); conversation memory table (§7).
+- [ ] Drop multi-key cloud rotation; single key w/ training opt-out or none; provider policy enforcement (plan C-note).
 
-## PDF Scanner & Archive
+### Phase 5 — Developer experience (weeks 11–12+, plan §8–10)
+- [ ] `lib/config.js`: single zod-validated config (env → DB settings → defaults); kill magic timeouts (§9.3).
+- [ ] ESLint flat + Prettier + `eslint-plugin-security`; `// @ts-check` + `tsc --noEmit` on touched files (§9.3).
+- [ ] Test layers: unit (deadline/penalty/backoff/arabic), contract (ETA fixtures → zod), integration (:memory: SQLite → outbox, fake transports), migration checks (FK clean); ≥ 85% on domain code; fix or quarantine the 1 known-red test (§8).
+- [ ] CI: GitHub Actions (lint+tests on Linux; Windows smoke on tags) + Dependabot weekly grouped PRs (§10).
+- [ ] Junction-based releases (`C:\sapauto\releases\…` + `scripts/release.ps1` with /health poll & auto-rollback; expand-only migrations) (§10).
+- [ ] Runbooks: WhatsApp re-pair, restore-from-backup, ETA portal change, secret rotation; refresh README + architecture diagram (§13).
 
-- **Module**: `domain/pdf-scanner.cjs` — `scanAndIngestAllPdfs({ db, importOlderVersions })`
-  - Discovers PDFs from older SAPAuto versions (SAPAuto, SAPAuto2, ..., v6.0), copies unique ones (SHA256) to `v8/data/pdfs/`
-  - Watches `v8/data/inbox_pdfs/` for user-dropped PDFs (auto-processed every 5 minutes)
-  - Performs `INSERT OR REPLACE` into `company_documents` with OCR text, type detection, company linking
-- **Startup**: `harness/index.js` calls `scanAndIngestAllPdfs` on startup.
-- **Schedule**: `harness/schedules.js` runs scan every 5 minutes.
-- **Archive route**: `launcher/app/api/archive/route.js` exposes `action=analyze_pdfs` and `action=scan_folder`.
-- **Archive UI**: Button label "فحص واستيراد ملفات PDF (OCR) تلقائياً".
-- **DB state**: ~187 `company_documents`, 57 with PDF files, 51 with OCR text.
+## Definition of done for V8.1 (from PLAN.md)
 
-## Dark Mode Theme Fixes Applied
+Zero lost notifications for 30 days • ≤ 2 unplanned restarts/week • high-risk freshness ≤ 15 min • completed restore drill • no plaintext secrets on disk/logs • dashboard behind auth + TLS • no client data to free-tier cloud models.
 
-- **Archive View (`launcher/components/archive-view.jsx`)**:
-  - Replaced all hardcoded light hex colors with CSS variables (`var(--surface)`, `var(--surface-2)`, `var(--border)`, `var(--border-soft)`, `var(--text)`, `var(--text-2)`, `var(--text-3)`).
-  - Converted `STATUS_TONES` from static pastels to theme vars (`var(--overdue-soft)`, `var(--soon-soft)`, `var(--done-soft)`, etc.).
-  - Add/Edit Document modal fully themed for dark mode.
-- **Launcher**: Clean production build completed and PM2 reloaded after each UI change.
+## Bring v8.1 live (later, one-time checklist)
 
-## Account Scanner Health
-
-- 26/26 accounts clean and active (0 failing, 0 parked).
-- All verified: `Thenile14`, `Bright_123`, `select_green`, `Trans_gulf`, `329724118`.
-- **Full Pipeline Test Completed**: Thenile14 processed successfully (6 documents, 16 obligations, 11 messages, 6 tasks, events generated, dry-run notifications queued).
-
-## Test Suite Status
-
-| Test Suite | Result | Details |
-|---|---|---|
-| `npm test` | **40/41 PASS** | 97.6% (1 MCP timeout non-critical) |
-| `test/channel-unlinked-silence.test.js` | **4/4 PASS** | Delivery throw fix — no silent failures |
-| `test/db.test.js` | **2/2 PASS** | Migration count updated to 26 |
-| `test/plan-2-4.test.js` | **21/21 PASS** | `RECORD_LIMITS.document_history = 20` added |
-| `test/plan-2-1.test.js` | **17/17 PASS** | All passing incl. Playwright wrap at 1440px & 390px (544 s — Chromium boot); OpenCode snapshot fits budget |
-| `test/mcp.test.js` | Pre-existing skip | MCP server timeout in isolated test runner |
-
-## Active .env Config (key values — no secrets listed)
-
-```
-NODE_ENV=production
-V8_OPENCODE_MODEL=openrouter/free
-AI_ALLOW_CLOUD=true
-AI_PROVIDER=gemma4
-MISTRAL_API_KEYS=mstrl_hqBOCR2cu...,mstrl_rHpH0pqHr...
-MISTRAL_MODEL=mistral-small-latest
-WHATSAPP_ENABLED=false
-V8_MESSAGE_MODE=live
-RESEND_API_KEYS=re_****REDACTED**** (full key lives only in .env — rotate/revoke in Resend dashboard per Opus5.5 Phase 0)
-RECIPIENT_EMAIL=ramygalal235@gmail.com
-SENDER_EMAIL=onboarding@resend.dev
-```
-
-> **Note**: 
-> - `WHATSAPP_ENABLED=false` in `.env` is overridden by database settings — WhatsApp is active and connected via the UI channel toggle.
-> - `V8_MESSAGE_MODE=live` in `.env` BUT database setting takes precedence: `message_mode='live'` confirmed in settings table.
-> - **Both .env and database now set to LIVE** — system is delivering real notifications to control number +201126170117.
-
-## Next Recommended Actions
-
-1. **Add More Mistral Keys**: Insert additional API keys into `MISTRAL_API_KEYS` array to extend rate limit capacity.
-2. **Configure User Channels**: Insert records in `user_channels` table to send notifications to specific users beyond the control number.
-3. **Implement Gmail OAuth**: Complete the OAuth specification (~2 hours) for Gmail-based email notifications.
-4. **Monitor Production**: Watch `pm2 logs sapauto-v8-channels` for delivery activity and WhatsApp health.
-5. **Review Overdue Tasks**: 6 overdue tasks for Thenile14 beyond 60-day penalty band require office confirmation.
-6. **Confirm Resolved Obligations**: 10 obligations marked `resolved_unconfirmed` for Thenile14 need office verification.
-
-## Production Readiness Status
-
-✅ **PRODUCTION-READY** — All systems operational, WhatsApp delivering live notifications, full pipeline tested end-to-end.
+1. Phase 0 + Phase 1 items marked above must be done first (especially: auth or 127.0.0.1 binding before anything listens on the network again).
+2. Stop v8 (already stopped), then copy `..\v8\data\` (DB + PDFs) and `..\v8\channels\.wwebjs_auth\` into v8.1 — then run migrations against the migrated DB (expand-only; verify via `PRAGMA foreign_key_check`).
+3. `npm ci` (done), new `ecosystem.config.cjs` from plan §6.7, `pm2 start` + restore the Startup boot hook pointing at v8.1.
