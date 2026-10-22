@@ -94,10 +94,11 @@ const apps = [
     ...common,
     name: 'sapauto-v8-launcher',
     script: path.join(root, 'launcher', 'node_modules', 'next', 'dist', 'bin', 'next'),
-    // Loopback only until dashboard auth + TLS ship (plan S1 / Phase 2).
-    // To restore LAN access afterwards: --hostname 0.0.0.0 plus a Caddy TLS
-    // front end and a firewall rule limited to known peer IPs.
-    args: 'start --hostname 127.0.0.1 --port 3000',
+    // v8.2 LAN pass (Owner request): bind all interfaces so any PC or phone on
+    // the network reaches the dashboard at http://<server-ip>:3000. Same-origin
+    // checks still pass per host (each browser's origin matches its own host)
+    // and open access keeps the roles open per the Owner's own decision.
+    args: 'start --hostname 0.0.0.0 --port 3000',
     cwd: path.join(root, 'launcher'),
     env: {
       SERVICE_NAME: 'launcher',
