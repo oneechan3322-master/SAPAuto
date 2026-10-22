@@ -1,4 +1,4 @@
-# Data Coverage Report — 2026-10-22 18:17:44 (task B0)
+# Data Coverage Report — 2026-10-22 19:30:44 (task B0)
 
 Database: C:\Users\Mega Store\Downloads\SapAuto\v8.1\data\sapauto.db · tables: 44 · code files scanned: 87
 
@@ -167,10 +167,10 @@ Database: C:\Users\Mega Store\Downloads\SapAuto\v8.1\data\sapauto.db · tables: 
 | current_account | 100% | "" | name,tableInQuery |
 | account_index | 100% | "0" | name,tableInQuery |
 | account_total | 100% | "1" | name,tableInQuery |
-| last_heartbeat | 100% | "2026-10-22T18:17:29.018Z" | name,tableInQuery |
+| last_heartbeat | 100% | "2026-10-22T18:20:59.089Z" | name,tableInQuery |
 | next_cycle_at | 0% | null | name,tableInQuery |
 | paused | 100% | "0" | name,tableInQuery |
-| updated_at | 100% | "2026-10-22T18:17:40.974Z" | name,tableInQuery |
+| updated_at | 100% | "2026-10-22T18:21:26.381Z" | name,tableInQuery |
 
 ## commands (22 rows)
 
@@ -377,9 +377,9 @@ Database: C:\Users\Mega Store\Downloads\SapAuto\v8.1\data\sapauto.db · tables: 
 |---|---|---|---|
 | id | 100% | "1" | name,tableInQuery |
 | state | 100% | "online" | name,tableInQuery |
-| last_run_at | 100% | "2026-10-22T18:17:41.778Z" | tableInQuery |
+| last_run_at | 100% | "2026-10-22T18:21:13.851Z" | tableInQuery |
 | last_error | 100% | "" | name,tableInQuery |
-| updated_at | 100% | "2026-10-22T18:17:41.778Z" | name,tableInQuery |
+| updated_at | 100% | "2026-10-22T18:21:13.851Z" | name,tableInQuery |
 
 ## assistant_attention (1372 rows)
 
@@ -463,10 +463,10 @@ Database: C:\Users\Mega Store\Downloads\SapAuto\v8.1\data\sapauto.db · tables: 
 | status | 100% | "qr_ready" | name,tableInQuery |
 | draft_only | 100% | "1" | tableInQuery |
 | connection_payload_ref | 0% | null | tableInQuery |
-| last_heartbeat_at | 100% | "2026-10-22T18:17:39.640Z" | name,tableInQuery |
+| last_heartbeat_at | 100% | "2026-10-22T18:21:10.484Z" | name,tableInQuery |
 | last_error | 0% | null | name,tableInQuery |
 | created_at | 100% | "2026-10-16 19:08:59" | name,tableInQuery |
-| updated_at | 100% | "2026-10-22T18:17:39.640Z" | name,tableInQuery |
+| updated_at | 100% | "2026-10-22T18:21:10.484Z" | name,tableInQuery |
 
 ## channel_contacts (0 rows)
 
@@ -576,7 +576,7 @@ Database: C:\Users\Mega Store\Downloads\SapAuto\v8.1\data\sapauto.db · tables: 
 | books_to_year | 100% | "" | — |
 | inspection_notes | 100% | "تم رصد إشارة إلى الفحص أو الدفاتر من نص ملف PDF المحفوظ." | — |
 | source_document_id | 100% | "pdf_d3e5a92c69c9c4f0" | — |
-| updated_at | 100% | "2026-10-22T18:15:41.764Z" | name |
+| updated_at | 100% | "2026-10-22T18:20:41.870Z" | name |
 
 ## scan_runs (0 rows)
 
@@ -601,7 +601,7 @@ Database: C:\Users\Mega Store\Downloads\SapAuto\v8.1\data\sapauto.db · tables: 
 | service | 100% | "assistant" | name,tableInQuery |
 | pid | 100% | "25708" | name,tableInQuery |
 | status | 100% | "online" | name,tableInQuery |
-| last_heartbeat | 100% | "2026-10-22T18:17:40.802Z" | name,tableInQuery |
+| last_heartbeat | 100% | "2026-10-22T18:21:10.846Z" | name,tableInQuery |
 | meta_json | 100% | "{\"telegram\":false,\"email\":false,\"queue\":{\"backlog\":0,\"dead\":" | name,tableInQuery |
 
 ## service_locks (3 rows)
@@ -610,7 +610,7 @@ Database: C:\Users\Mega Store\Downloads\SapAuto\v8.1\data\sapauto.db · tables: 
 |---|---|---|---|
 | service | 100% | "harness" | name,tableInQuery |
 | owner | 100% | "mailtg-sender:25708:2435831a" | name,tableInQuery |
-| expires_at | 100% | "2026-10-22T18:17:59.464Z" | name,tableInQuery |
+| expires_at | 100% | "2026-10-22T18:21:39.833Z" | name,tableInQuery |
 
 ## notification_outbox (6 rows) — internal
 
