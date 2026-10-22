@@ -18,7 +18,7 @@ const EXCLUDED_DIRECTORIES = new Set(['.git', '.local', '.next', '.venv', 'auth'
 /* Planning documents are internal narrative, not source to review. Matched by
    pattern rather than by name: a new plan file must never silently re-enter the
    snapshot budget. */
-const EXCLUDED_FILE_PATTERN = /^(?:plan|readme|changelog|license|agents|codemap|complete-version-analysis|comparison|definition|production-beast-prompt|v8|current[_-]session[_-]state|channel-improvements|mistral-error|full-pipeline-test-report)[^/\\]*\.md$/i
+const EXCLUDED_FILE_PATTERN = /^(?:plan|readme|changelog|license|agents|codemap|complete-version-analysis|comparison|definition|production-beast-prompt|v8|study|opus|current[_-]session[_-]state|channel-improvements|mistral-error|full-pipeline-test-report)[^/\\]*\.md$/i
 const MAX_SOURCE_BYTES = 1152 * 1024
 const MAX_FILE_BYTES = 56 * 1024
 const MAX_FILES = 400

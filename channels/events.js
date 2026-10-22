@@ -232,10 +232,14 @@ async function deliverEvent(event, providers, db = getDatabase()) {
         JOIN users u ON u.id=c.user_id WHERE u.disabled=0 AND u.role IN ('Owner','Operator')`).all()
   // A configured WhatsApp control number is an explicit wake channel. It does
   // not grant access to every contact and is used only for operational events.
+  // After the sender split the dispatcher owns no provider objects, shadow
+  // recording still uses the target: what would have gone to the control
+  // number must appear in the mirror before the cut-over (§6.2).
   const wakeEnabled = db.prepare("SELECT value FROM settings WHERE key='whatsapp_wake_notifications'").get()?.value === 'true'
   const controlNumber = db.prepare("SELECT value FROM settings WHERE key='whatsapp_control_number'").get()?.value || ''
   const wakeKinds = new Set(['new_doc', 'changed_doc', 'deadline_reminder', 'reminder_due', 'assistant_attention', 'account_parked', 'harness_offline'])
-  if (wakeEnabled && controlNumber && wakeKinds.has(event.kind) && (providers.whatsapp || queueLive)) {
+  if (wakeEnabled && controlNumber && wakeKinds.has(event.kind) &&
+      (providers.whatsapp || queueLive || outboxShadowEnabled(db))) {
     const controlExternalId = `${controlNumber.replace(/^\+/, '')}@c.us`
     if (!links.some((link) => link.channel === 'whatsapp' && link.external_id === controlExternalId)) {
       links = [...links, { channel: 'whatsapp', external_id: controlExternalId }]
@@ -355,7 +359,9 @@ function startEventDispatcher(providers, { db = getDatabase(), intervalMs = 1000
     try {
       checkHarnessOffline(db)
       enqueueDueReminders(db)
-      const events = db.prepare('SELECT * FROM events WHERE announced=0 ORDER BY created_at LIMIT 60').all()
+      const events = db.prepare(`SELECT * FROM events WHERE announced=0
+        ORDER BY CASE WHEN kind IN ('assistant_attention','harness_offline','reminder_due','report_requested') THEN 0 ELSE 1 END,
+        created_at LIMIT 60`).all()
       if (events.length) {
         // A day of offline scanning must never become dozens of WhatsApp
         // bubbles: coalesce the operational backlog into one grouped digest
