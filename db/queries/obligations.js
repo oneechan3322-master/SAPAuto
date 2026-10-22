@@ -20,8 +20,11 @@ function markDone(id, userId, evidence = '', db = getDatabase()) {
   return db.transaction(() => {
     const result = db.prepare(`UPDATE obligations
       SET local_review_status='completed_locally', local_review_note=?,
-          local_reviewed_at=?, local_reviewed_by=?, updated_at=?
-      WHERE id=?`).run(note, now(), actorId, now(), id)
+          local_reviewed_at=?, local_reviewed_by=?, updated_at=?,
+          review_state='confirmed_resolved',
+          review_note=COALESCE(NULLIF(?, ''), review_note),
+          review_updated_at=?, review_updated_by=?
+      WHERE id=?`).run(note, now(), actorId, now(), note, now(), actorId, id)
     if (result.changes) {
       const source = db.prepare('SELECT status,evidence FROM obligations WHERE id=?').get(id)
       audit(db, {

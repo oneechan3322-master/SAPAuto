@@ -9,6 +9,84 @@ function stable(prefix, value) {
   return `${prefix}_${createHash('sha256').update(String(value)).digest('hex').slice(0, 24)}`
 }
 
+// v8.2 C.3 — migration 028's `absent_scan_streak`/`review_state` columns had no
+// writers. This pass connects them (plan §C.3 "review-first, rules later"):
+//  - an entity the portal stops showing for N consecutive *successful* scans
+//    is queued for review (`needs_review`) — absence alone must NEVER read as
+//    "resolved" (plan 2.3 §2: truth over polish)
+//  - a human confirmation writes `confirmed_resolved` through markDone /
+//    payment-paid routes — this pass never touches a confirmed state
+//  - if the portal shows the entity again, the queue entry is cleared and the
+//    streak resets, because the evidence contradicted the absence
+const ABSENT_REVIEW_THRESHOLD = 2
+const ABSENT_FLIP_NOTE = (streak) => `لم يعد يظهر على البوابة بعد ${streak} عمليات فحص متتالية`
+const ABSENT_CLEAR_NOTE = 'أعادت البوابة إظهاره أثناء الفحص'
+
+function applyAbsenceReview(db, accountKey, timestamp, table, seenKeys) {
+  const config = {
+    obligations: {
+      entity: 'obligation',
+      select: 'SELECT id, obligation_code, period, absent_scan_streak AS streak, review_state FROM obligations WHERE account_key=?',
+      key: (row) => `${row.obligation_code}|${row.period}`
+    },
+    payments: {
+      entity: 'payment',
+      select: 'SELECT id, claim_number, absent_scan_streak AS streak, review_state FROM payments WHERE account_key=?',
+      key: (row) => String(row.claim_number)
+    }
+  }[table]
+  if (!config) throw new Error(`Unsupported absence review table: ${table}`)
+
+  const rows = db.prepare(config.select).all(accountKey)
+  const update = db.prepare(`UPDATE ${table}
+    SET absent_scan_streak=?,
+        review_state=CASE WHEN ? = 'flip' THEN 'needs_review' WHEN ? = 'clear' THEN NULL ELSE review_state END,
+        review_note=CASE WHEN ? = 'flip' THEN ? WHEN ? = 'clear' THEN review_note || ? ELSE review_note END,
+        review_updated_at=CASE WHEN ? IN ('flip','clear') THEN ? ELSE review_updated_at END,
+        review_updated_by=CASE WHEN ? IN ('flip','clear') THEN 'harness.ingest' ELSE review_updated_by END
+    WHERE id=?`)
+  const recordEvent = db.prepare(`INSERT INTO events(id,kind,account_key,entity_id,payload,created_at)
+    VALUES(?,?,?,?,?,?)`)
+  let flipped = 0
+  let cleared = 0
+  for (const row of rows) {
+    const natural = config.key(row)
+    if (seenKeys.has(natural)) {
+      if (row.streak > 0 || row.review_state === 'needs_review') {
+        const unqueue = row.review_state === 'needs_review' ? 'clear' : ''
+        update.run(0, '', unqueue, '', '', unqueue,
+          unqueue ? ` ${ABSENT_CLEAR_NOTE}` : ` ${ABSENT_CLEAR_NOTE}`,
+          unqueue, timestamp, unqueue, row.id)
+        if (row.review_state === 'needs_review') {
+          cleared += 1
+          recordEvent.run(id('event'), 'review_cleared', accountKey, row.id,
+            JSON.stringify({ table, natural }), timestamp)
+        }
+      }
+      continue
+    }
+    const streak = (row.streak || 0) + 1
+    const flip = streak >= ABSENT_REVIEW_THRESHOLD && (row.review_state === null || row.review_state === '')
+    update.run(streak, flip ? 'flip' : '', flip ? 'flip' : '', flip ? 'flip' : '', flip ? ABSENT_FLIP_NOTE(streak) : '',
+      '', '', flip ? 'flip' : '', timestamp, flip ? 'flip' : '', row.id)
+    if (flip) {
+      flipped += 1
+      audit(db, {
+        actorId: 'harness.ingest',
+        action: 'ingest.absent_needs_review',
+        entityType: config.entity,
+        entityId: row.id,
+        details: { table, natural, streak, portalChanged: false }
+      })
+    }
+  }
+  if (flipped > 0) {
+    recordEvent.run(id('event'), 'absent_batch', accountKey, table,
+      JSON.stringify({ table, flipped, threshold: ABSENT_REVIEW_THRESHOLD }), timestamp)
+  }
+  return { flipped, cleared, total: rows.length }
+}
+
 function upsertRows(db, accountKey, companyId, table, rows, keyName, mapRow) {
   const insertSql = {
     tasks: `INSERT INTO tasks(id, company_id, account_key, doc_number, title, deadline, status, urgency,
@@ -90,7 +168,7 @@ function ingestAccount(result, db = getDatabase()) {
         deadline: String(row.deadline || row.dueDate || ''), status: String(row.status || ''),
       penalty_band: String(row.penaltyBand || ''), evidence: String(row.evidence || '')
     }))
-upsertRows(db, accountKey, companyId, 'payments', result.payments, 'claimNumber', (row, base) => ({
+    upsertRows(db, accountKey, companyId, 'payments', result.payments, 'claimNumber', (row, base) => ({
       ...base, claim_number: String(row.claimNumber || row.id || ''),
         amount: row.amount === null || row.amount === undefined || row.amount === ''
           ? null
@@ -103,6 +181,11 @@ upsertRows(db, accountKey, companyId, 'payments', result.payments, 'claimNumber'
         // clean overdue payment (plan 2.3 §2 "truth over polish").
         source_stale: row.stale ? 1 : 0
       }))
+    applyAbsenceReview(db, accountKey, timestamp, 'obligations', new Set(result.obligations.map((row) =>
+      `${String(row.obligationCode || row.code || row.id || '').trim()}|${String(row.period || row.periodKey || '')}`
+    ).filter((key) => !key.startsWith('|'))))
+    applyAbsenceReview(db, accountKey, timestamp, 'payments', new Set(result.payments.map((row) =>
+      String(row.claimNumber || row.id || '').trim()).filter(Boolean)))
     upsertRows(db, accountKey, companyId, 'messages', result.messages, 'portalMessageId', (row, base) => ({
       ...base, portal_message_id: String(row.portalMessageId || row.id || ''),
       title: String(row.title || row.subject || row.rawSummary || ''), body: String(row.body || row.message || ''),

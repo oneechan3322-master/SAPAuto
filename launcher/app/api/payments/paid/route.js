@@ -31,9 +31,12 @@ export async function POST(request) {
   const timestamp = now()
   const updated = db.transaction(() => {
     const result = db.prepare(`UPDATE payments
-      SET local_review_status='paid_locally', local_paid_at=?, local_paid_reason=?, updated_at=?
+      SET local_review_status='paid_locally', local_paid_at=?, local_paid_reason=?, updated_at=?,
+          review_state='confirmed_resolved',
+          review_note=CASE WHEN ? <> '' THEN ? ELSE review_note END,
+          review_updated_at=?, review_updated_by=?
       WHERE id=?`)
-      .run(timestamp, reason, timestamp, body.id)
+      .run(timestamp, reason, timestamp, body.id, reason, reason, timestamp, authz.session.user.id)
     audit(db, {
       actorId: authz.session.user.id,
       action: 'payment.marked_paid_local',
