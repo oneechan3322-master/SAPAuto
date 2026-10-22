@@ -106,7 +106,7 @@ upsertRows(db, accountKey, companyId, 'payments', result.payments, 'claimNumber'
     upsertRows(db, accountKey, companyId, 'messages', result.messages, 'portalMessageId', (row, base) => ({
       ...base, portal_message_id: String(row.portalMessageId || row.id || ''),
       title: String(row.title || row.subject || row.rawSummary || ''), body: String(row.body || row.message || ''),
-        severity: String(row.severity || ''), received_at: row.receivedAt || row.date || null,
+        severity: String(row.severity || ''), received_at: row.receivedAt || row.date || row.scrapedAt || null,
       is_read: row.isRead ? 1 : 0
     }))
     const scannedNumbers = new Set(result.tasks.map((task) =>
