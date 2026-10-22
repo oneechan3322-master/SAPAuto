@@ -232,6 +232,12 @@ function ingestAccount(result, db = getDatabase()) {
   } catch (err) {
     console.warn(`[ingestAccount] Archive sync failed for ${accountKey}: ${err.message}`)
   }
+  try {
+    const { syncCompanyFolders } = require('../domain/company-folders.cjs')
+    syncCompanyFolders(db)
+  } catch (err) {
+    console.warn(`[ingestAccount] Company folder sync failed for ${accountKey}: ${err.message}`)
+  }
   triggerLiveAiStudy(accountKey, db)
 }
 
