@@ -361,7 +361,10 @@ function checkHarnessOffline(db = getDatabase(), currentTime = Date.now()) {
 // an archived row would be silently dead), and report_requested belongs to
 // the reports flow that the Owner may revive.
 const ARCHIVE_EXEMPT_KINDS = new Set(['reminder_due', 'report_requested'])
-const ARCHIVE_TTL_DAYS = 7
+// Three days: a pending event that waited this long has nobody to receive it
+// (delivery links are the drain), and the card's bar is a backlog holding
+// only *current* news — four-day-old "PDF was studied" noise is review history.
+const ARCHIVE_TTL_DAYS = 3
 
 function archiveStaleEvents(db, { cutoffDays = ARCHIVE_TTL_DAYS, currentDate = new Date() } = {}) {
   const cutoff = new Date(currentDate.getTime() - cutoffDays * 24 * 60 * 60 * 1000).toISOString()
