@@ -1,14 +1,14 @@
-/* Kamal Mode — V7-style dark theme with ambient light effects */
-
 .kamal-mode {
   position: relative;
   min-height: 100vh;
   isolation: isolate;
+  background-color: #080d18;
   background-image:
-    linear-gradient(rgba(116, 171, 199, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(116, 171, 199, 0.025) 1px, transparent 1px);
-  background-size: 48px 48px;
-  background-color: #0b0518;
+    radial-gradient(ellipse at 82% 8%, rgb(83 81 158 / 14%), transparent 34%),
+    radial-gradient(ellipse at 8% 68%, rgb(43 111 133 / 12%), transparent 36%),
+    linear-gradient(rgb(135 159 191 / 3%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(135 159 191 / 3%) 1px, transparent 1px);
+  background-size: auto, auto, 48px 48px, 48px 48px;
 }
 
 .kamal-mode::before {
@@ -16,17 +16,50 @@
   z-index: -1;
   inset: 0;
   background:
-    radial-gradient(circle at 13% 22%, rgba(125, 248, 255, 0.72) 0 1px, transparent 2px),
-    radial-gradient(circle at 42% 75%, rgba(151, 139, 255, 0.65) 0 1px, transparent 2px),
-    radial-gradient(circle at 77% 18%, rgba(113, 220, 255, 0.58) 0 1px, transparent 2px),
-    radial-gradient(circle at 89% 68%, rgba(223, 150, 255, 0.55) 0 1px, transparent 2px),
-    radial-gradient(ellipse at 18% 46%, rgba(18, 169, 200, 0.09), transparent 35%),
-    radial-gradient(ellipse at 84% 29%, rgba(124, 73, 215, 0.10), transparent 37%);
-  background-size: 340px 300px, 420px 360px, 510px 370px, 460px 420px, 100% 100%, 100% 100%;
-  content: '';
-  opacity: 0.54;
+    radial-gradient(circle at 14% 23%, rgb(129 140 255 / 48%) 0 1px, transparent 2px),
+    radial-gradient(circle at 43% 76%, rgb(232 96 242 / 34%) 0 1px, transparent 2px),
+    radial-gradient(circle at 78% 17%, rgb(106 200 231 / 36%) 0 1px, transparent 2px),
+    radial-gradient(circle at 90% 69%, rgb(129 140 255 / 30%) 0 1px, transparent 2px);
+  background-size: 390px 330px, 470px 410px, 530px 390px, 490px 440px;
+  content: "";
+  opacity: .32;
   pointer-events: none;
-  animation: star-drift 42s linear infinite alternate;
+  animation: cyber-star-drift 60s linear infinite alternate;
+}
+
+.kamal-mode {
+  --canvas: #080d18;
+  --canvas-alt: #0d1422;
+  --surface: #121c2b;
+  --surface-2: #172337;
+  --surface-3: #1e2d44;
+  --surface-inset: #0d1522;
+  --border: #293a52;
+  --border-soft: #202f45;
+  --border-strong: #3e5574;
+  --text: #f4f4fb;
+  --text-2: #d4d6e5;
+  --text-3: #a1a8c0;
+  --text-4: #747f9b;
+  --accent: #b3a1ff;
+  --accent-strong: #c7baff;
+  --accent-ink: #171128;
+  --accent-soft: #261f43;
+  --accent-line: #655394;
+  --info: #8bc9ed;
+  --info-soft: #14283b;
+  --overdue: #ff9ba8;
+  --overdue-soft: #351d2b;
+  --overdue-line: #754052;
+  --soon: #f4c978;
+  --soon-soft: #352b1f;
+  --soon-line: #725b35;
+  --done: #7fddb5;
+  --done-soft: #18352e;
+  --done-line: #3c725f;
+  --neutral: #a7b2c5;
+  --neutral-soft: #202b3b;
+  --neutral-line: #3b4a60;
 }
 
 .kamal-ambient {
@@ -34,135 +67,59 @@
   z-index: -1;
   width: 460px;
   height: 460px;
-  border: 1px solid rgba(81, 205, 223, 0.07);
+  border: 1px solid rgb(129 140 255 / 7%);
   border-radius: 50%;
   pointer-events: none;
-  animation: ambient-float 16s ease-in-out infinite alternate;
+  animation: cyber-ambient-drift 22s ease-in-out infinite alternate;
 }
 
 .kamal-ambient::before,
 .kamal-ambient::after {
   position: absolute;
   inset: 34px;
-  border: 1px solid rgba(81, 205, 223, 0.045);
+  border: 1px solid rgb(232 96 242 / 5%);
   border-radius: 50%;
-  content: '';
+  content: "";
 }
 
-@keyframes star-drift {
-  0% { background-position: 0 0, 420px 360px, 510px 370px, 460px 420px, 0 0, 0 0; }
-  100% { background-position: 340px 300px, 0 0, 0 0, 0 0, 100% 100%, 100% 100%; }
-}
-
-@keyframes ambient-float {
-  0% { transform: translate(0, 0) rotate(0deg); }
-  100% { transform: translate(20px, -15px) rotate(8deg); }
-}
-
-/* Override design system tokens for Kamal mode */
-.kamal-mode {
-  --canvas: #0b0518;
-  --canvas-alt: #120822;
-  --surface: #1a1028;
-  --surface-2: #251535;
-  --surface-3: #301a45;
-  --surface-inset: #140d20;
-  --border: #3d285c;
-  --border-soft: #2a1f40;
-  --border-strong: #5c3d8f;
-  --text: #f0e6ff;
-  --text-2: #d1c0e8;
-  --text-3: #a890c8;
-  --text-4: #7d6aa8;
-  --accent: #8b5cf6;
-  --accent-strong: #a78bfa;
-  --accent-ink: #0b0518;
-  --accent-soft: #241840;
-  --accent-line: #6d28d9;
-  --overdue: #f472b6;
-  --overdue-soft: #2d1628;
-  --overdue-line: #e11d48;
-  --soon: #fbbf24;
-  --soon-soft: #2d2a16;
-  --soon-line: #d97706;
-  --done: #4ade80;
-  --done-soft: #122014;
-  --done-line: #16a34a;
-  --neutral: #a78bfa;
-  --neutral-soft: #1f1a30;
-  --neutral-line: #3d2f5c;
-}
-
-/* Border beam effect for Cyber mode */
-.kamal-mode .panel,
-.kamal-mode .company-card,
-.kamal-mode .record-card,
-.kamal-mode .tax-kpi-card,
-.kamal-mode .payment-worklist-intro {
-  position: relative;
-  background: rgba(26, 16, 40, 0.8);
-  backdrop-filter: blur(12px);
-  border-color: rgba(125, 248, 255, 0.15);
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.4), 
-    0 0 0 1px rgba(125, 248, 255, 0.05),
-    0 0 20px rgba(139, 92, 246, 0.3);
-  animation: border-beam 3s ease-in-out infinite;
-}
-
-@keyframes border-beam {
-  0%, 100% {
-    box-shadow: 
-      0 8px 32px rgba(0, 0, 0, 0.4), 
-      0 0 0 1px rgba(125, 248, 255, 0.05),
-      0 0 20px rgba(139, 92, 246, 0.3);
-  }
-  50% {
-    box-shadow: 
-      0 8px 32px rgba(0, 0, 0, 0.4), 
-      0 0 0 1px rgba(125, 248, 255, 0.15),
-      0 0 30px rgba(139, 92, 246, 0.5);
-  }
+.kamal-mode .sidebar {
+  border-inline-end-color: rgb(129 140 255 / 13%);
+  background: linear-gradient(180deg, rgb(15 23 39 / 96%), rgb(11 18 31 / 96%));
 }
 
 .kamal-mode .side-link.active {
-  background: rgba(139, 92, 246, 0.2);
-  color: #c4b5fd;
+  color: #e0d9ff;
+  background: linear-gradient(100deg, rgb(129 140 255 / 17%), rgb(232 96 242 / 8%));
+  box-shadow: inset 0 0 0 1px rgb(129 140 255 / 16%);
 }
 
-.kamal-mode .side-link.active svg {
-  color: #a78bfa;
-}
+.kamal-mode .side-link.active svg { color: #c2b4ff; }
+.kamal-mode .nav-active-mark { background: linear-gradient(180deg, #e860f2, #818cff); }
 
 .kamal-mode button.button-primary {
-  background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
-  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+  background: linear-gradient(110deg, #d66ee4, #8992ff);
+  box-shadow: 0 5px 18px rgb(129 140 255 / 18%);
 }
 
 .kamal-mode button.button-primary:hover {
-  background: linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%);
-  box-shadow: 0 6px 24px rgba(139, 92, 246, 0.5);
+  background: linear-gradient(110deg, #e78bf0, #a4acff);
+  box-shadow: 0 8px 24px rgb(129 140 255 / 25%);
 }
 
-/* Custom scrollbar for Cyber mode */
-.kamal-mode ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.kamal-mode ::-webkit-scrollbar { width: 7px; height: 7px; }
+.kamal-mode ::-webkit-scrollbar-track { background: transparent; }
+.kamal-mode ::-webkit-scrollbar-thumb { border: 2px solid var(--canvas); border-radius: 9px; background: #39496a; }
+.kamal-mode ::-webkit-scrollbar-thumb:hover { background: #6578a6; }
+
+@keyframes cyber-star-drift {
+  to { background-position: 390px 330px, 0 0, 0 0, 0 0; }
 }
 
-.kamal-mode ::-webkit-scrollbar-track {
-  background: transparent;
+@keyframes cyber-ambient-drift {
+  to { transform: translate(16px, -12px) rotate(5deg); }
 }
 
-.kamal-mode ::-webkit-scrollbar-thumb {
-  background: var(--accent);
-  border-radius: 3px;
-}
-
-.kamal-mode ::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-strong);
-}
-
-.kamal-mode ::-webkit-scrollbar-corner {
-  background: transparent;
+@media (prefers-reduced-motion: reduce) {
+  .kamal-mode::before,
+  .kamal-ambient { animation: none; }
 }

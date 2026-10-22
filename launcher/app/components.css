@@ -97,6 +97,12 @@
   transition: border-color .15s var(--ease), background .15s var(--ease);
 }
 .priority-item:hover { border-color: var(--border-strong); background: var(--surface-3); }
+.priority-item-featured {
+  padding: calc(var(--s-3) - 1px) calc(var(--s-4) - 1px);
+  border: 2px solid var(--accent-line);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+}
 .priority-rail { width: 3px; align-self: stretch; border-radius: var(--r-full); background: var(--item-accent, var(--accent)); }
 .priority-copy { display: grid; min-width: 0; gap: 2px; }
 .priority-title { font-family: var(--font-display); font-size: var(--t-base); font-weight: 600; overflow-wrap: anywhere; }
@@ -135,6 +141,78 @@
   white-space: nowrap;
 }
 
+@property --cyber-edge-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.kamal-mode .priority-item-featured,
+.kamal-mode .priority-panel,
+.kamal-mode .panel,
+.kamal-mode .company-card,
+.kamal-mode .company-document-card,
+.kamal-mode .archive-document-card,
+.kamal-mode .record-card,
+.kamal-mode .tax-kpi-card,
+.kamal-mode .payment-worklist-intro,
+.kamal-mode .channel-experience {
+  position: relative;
+  border-width: 2px;
+  border-color: color-mix(in srgb, #818cff 24%, var(--border));
+}
+
+.kamal-mode .priority-item-featured {
+  isolation: isolate;
+  overflow: hidden;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: 0 0 22px color-mix(in srgb, #e860f2 10%, transparent);
+}
+
+.kamal-mode .priority-item-featured::after,
+.kamal-mode .priority-panel::after,
+.kamal-mode .panel::after,
+.kamal-mode .company-card::after,
+.kamal-mode .company-document-card::after,
+.kamal-mode .archive-document-card::after,
+.kamal-mode .record-card::after,
+.kamal-mode .tax-kpi-card::after,
+.kamal-mode .payment-worklist-intro::after,
+.kamal-mode .channel-experience::after {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  padding: 2px;
+  border-radius: inherit;
+  background: conic-gradient(from var(--cyber-edge-angle), transparent 0 34%, #e860f2 41%, #818cff 45%, transparent 52% 100%);
+  content: "";
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: cyber-edge-chase 6s linear infinite;
+}
+
+.kamal-mode .priority-item-featured::before {
+  position: absolute;
+  z-index: -1;
+  inset: 2px;
+  width: auto;
+  height: auto;
+  border-radius: calc(var(--r-sm) - 2px);
+  background: var(--surface-2);
+  content: "";
+  pointer-events: none;
+}
+
+.kamal-mode .priority-item-featured:hover::before { background: var(--surface-3); }
+.kamal-mode .priority-item-featured > * { position: relative; z-index: 1; }
+.kamal-mode .priority-item-featured:hover { border-color: transparent; background: transparent; }
+
+@keyframes cyber-edge-chase { to { --cyber-edge-angle: 360deg; } }
+
 .empty-state {
   display: grid;
   min-height: 120px;
@@ -153,9 +231,14 @@
 .dashboard-columns { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .75fr); gap: var(--s-4); }
 .status-overview { grid-template-columns: minmax(0, 1fr); }
 .dashboard-card { min-width: 0; padding: var(--s-5); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-1); }
+.dashboard-sync-card { display: grid; align-content: start; gap: var(--s-2); }
+.dashboard-sync-card .card-heading { margin-bottom: 0; }
+.dashboard-sync-time { color: var(--text); font-family: var(--font-display); font-size: var(--t-md); font-weight: 600; }
+.dashboard-sync-note { color: var(--text-3); font-size: var(--t-xs); }
 .card-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-4); }
 .card-heading h2 { font-size: var(--t-lg); }
 .card-heading a { color: var(--accent); font-size: var(--t-xs); font-weight: 600; }
+.failure-link { display: inline-flex; align-items: center; gap: var(--s-2); margin-top: var(--s-2); padding-top: var(--s-3); border-top: 1px solid var(--border-soft); color: var(--overdue); font-size: var(--t-xs); font-weight: 600; }
 
 .service-list { display: grid; }
 .service-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-3); padding: var(--s-3) 0; border-bottom: 1px solid var(--border-soft); }
@@ -956,4 +1039,14 @@
     animation-duration: .01ms !important;
     transition-duration: .01ms !important;
   }
+  .kamal-mode .priority-item-featured::after,
+  .kamal-mode .priority-panel::after,
+  .kamal-mode .panel::after,
+  .kamal-mode .company-card::after,
+  .kamal-mode .company-document-card::after,
+  .kamal-mode .archive-document-card::after,
+  .kamal-mode .record-card::after,
+  .kamal-mode .tax-kpi-card::after,
+  .kamal-mode .payment-worklist-intro::after,
+  .kamal-mode .channel-experience::after { animation: none; }
 }

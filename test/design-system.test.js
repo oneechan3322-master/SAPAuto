@@ -77,10 +77,33 @@ test('the design system defines one type scale, an 8px grid, one accent and sema
 
 test('light and dark themes both exist and follow the system by default', () => {
   const system = read('design-system.css')
-  assert.match(system, /:root,\n:root\[data-theme="dark"\]/)
+  assert.match(system, /:root,\r?\n:root\[data-theme="dark"\]/)
   assert.match(system, /:root\[data-theme="light"\]/)
   assert.match(system, /@media \(prefers-color-scheme: light\) \{\s*\n\s*:root:not\(\[data-theme\]\)/)
   assert.match(read('layout.jsx'), /sapauto\.theme/)
+})
+
+test('Cyber uses the selected six-second, two-pixel edge and theme-aware surfaces', () => {
+  const cyber = read('kamal/kamal-mode.css')
+  const components = read('components.css')
+  assert.match(cyber, /background-color: #080d18/)
+  assert.match(cyber, /#e860f2/)
+  assert.match(cyber, /#818cff/)
+  assert.match(components, /border-width: 2px/)
+  assert.match(components, /padding: 2px/)
+  assert.match(components, /animation: cyber-edge-chase 6s linear infinite/)
+  assert.match(components, /@media \(prefers-reduced-motion: reduce\)/)
+
+  const mission = fs.readFileSync(path.resolve(__dirname, '../launcher/components/mission-board.jsx'), 'utf8')
+  assert.match(mission, /priority-panel[\s\S]*summary-strip/, 'attention appears before the summary strip')
+  assert.match(mission, /priority-item-featured/, 'the leading priority item gets the Cyber treatment')
+  assert.match(mission, /dashboard-sync-card/, 'the home page presents data freshness in plain language')
+  assert.doesNotMatch(mission, /حالة النظام|المتابعة والقنوات|function ServiceRow|return ['"]—['"]/)
+
+  for (const file of ['archive-view.jsx', 'company-documents-card.jsx']) {
+    const source = fs.readFileSync(path.resolve(__dirname, `../launcher/components/${file}`), 'utf8')
+    assert.doesNotMatch(source, /#[\da-fA-F]{3,8}\b/, `${file} uses shared theme tokens instead of fixed colors`)
+  }
 })
 
 test('the live dashboard renders the new shell and honours the digit setting', async (t) => {

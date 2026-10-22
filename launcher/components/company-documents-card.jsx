@@ -14,10 +14,10 @@ const DOC_TYPE_LABELS = {
 }
 
 const STATUS_TONES = {
-  urgent: { bg: '#fecdd3', text: '#9f1239', border: '#f43f5e' },
-  attention: { bg: '#fef08a', text: '#854d0e', border: '#eab308' },
-  calm: { bg: '#dcfce7', text: '#166534', border: '#22c55e' },
-  neutral: { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' }
+  urgent: { bg: 'var(--overdue-soft)', text: 'var(--overdue)', border: 'var(--overdue-line)' },
+  attention: { bg: 'var(--soon-soft)', text: 'var(--soon)', border: 'var(--soon-line)' },
+  calm: { bg: 'var(--done-soft)', text: 'var(--done)', border: 'var(--done-line)' },
+  neutral: { bg: 'var(--neutral-soft)', text: 'var(--neutral)', border: 'var(--neutral-line)' }
 }
 
 export default function CompanyDocumentsCard({ companyId, initialDocuments = [] }) {
@@ -90,12 +90,12 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
     <section className="stack mt-6" id="company-documents-archive">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Archive size={20} className="text-sky-600" />
+          <Archive size={20} style={{ color: 'var(--accent)' }} />
           <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800 }}>
             أرشيف الوثائق والسجلات والمهل الرسمية
           </h2>
         </div>
-        <Link href="/archive" style={{ fontSize: '0.82rem', color: '#0284c7', textDecoration: 'none', fontWeight: 600 }}>
+        <Link href="/archive" style={{ fontSize: '0.82rem', color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
           فتح الأرشيف العام لجميع الشركات ←
         </Link>
       </div>
@@ -111,10 +111,11 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
           return (
             <div
               key={doc.id || doc.doc_type}
+              className="company-document-card"
               style={{
-                backgroundColor: '#fff',
-                borderRadius: '8px',
-                border: '1px solid #e2e8f0',
+                backgroundColor: 'var(--surface)',
+                borderRadius: 'var(--r-md)',
+                border: '1px solid var(--border)',
                 borderRight: `4px solid ${tone.border}`,
                 padding: '12px 14px',
                 display: 'flex',
@@ -125,7 +126,7 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
             >
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text)' }}>
                     {doc.doc_name}
                   </div>
                   <span style={{
@@ -144,29 +145,29 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
 
                 <div style={{ marginTop: '8px', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <div style={{ display: 'flex', gap: '4px' }}>
-                    <span style={{ color: '#64748b', minWidth: '75px' }}>رقم الوثيقة:</span>
-                    <span style={{ fontWeight: doc.doc_number ? 600 : 400, color: doc.doc_number ? '#1e293b' : '#94a3b8' }}>
+                    <span style={{ color: 'var(--text-3)', minWidth: '75px' }}>رقم الوثيقة:</span>
+                    <span style={{ fontWeight: doc.doc_number ? 600 : 400, color: doc.doc_number ? 'var(--text)' : 'var(--text-4)' }}>
                       {doc.doc_number || 'غير مسجل'}
                     </span>
                   </div>
 
                   <div style={{ display: 'flex', gap: '4px' }}>
-                    <span style={{ color: '#64748b', minWidth: '75px' }}>الصلاحية:</span>
-                    <span style={{ fontWeight: 600, color: doc.expiry_date ? '#0f172a' : '#94a3b8' }}>
+                    <span style={{ color: 'var(--text-3)', minWidth: '75px' }}>الصلاحية:</span>
+                    <span style={{ fontWeight: 600, color: doc.expiry_date ? 'var(--text)' : 'var(--text-4)' }}>
                       {doc.expiry_date || 'غير محدد'}
                     </span>
                   </div>
 
                   <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                    <span style={{ color: '#64748b', minWidth: '75px' }}>👤 المسؤول:</span>
-                    <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#0369a1', background: '#e0f2fe', padding: '1px 6px', borderRadius: '4px' }}>
+                    <span style={{ color: 'var(--text-3)', minWidth: '75px' }}>👤 المسؤول:</span>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--info)', background: 'var(--info-soft)', padding: '1px 6px', borderRadius: '4px' }}>
                       {doc.assigned_role || 'المحاسب القانوني'}
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #f8fafc', paddingTop: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-soft)', paddingTop: '6px' }}>
                 <button
                   type="button"
                   onClick={() => openEdit(doc)}
@@ -175,12 +176,12 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
                     alignItems: 'center',
                     gap: '4px',
                     padding: '4px 10px',
-                    backgroundColor: '#f1f5f9',
-                    border: '1px solid #cbd5e1',
+                    backgroundColor: 'var(--surface-2)',
+                    border: '1px solid var(--border)',
                     borderRadius: '4px',
                     fontSize: '0.75rem',
                     fontWeight: 600,
-                    color: '#334155',
+                    color: 'var(--text-2)',
                     cursor: 'pointer'
                   }}
                 >
@@ -197,18 +198,18 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
         <div style={{
           position: 'fixed',
           top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(15, 23, 42, 0.65)',
+          backgroundColor: 'color-mix(in srgb, var(--canvas) 76%, transparent)',
           backdropFilter: 'blur(3px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 9999, padding: '16px'
         }}>
           <div style={{
-            backgroundColor: '#fff', borderRadius: '12px', maxWidth: '500px', width: '100%',
-            overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)'
+            backgroundColor: 'var(--surface)', color: 'var(--text)', borderRadius: 'var(--r-lg)', maxWidth: '500px', width: '100%',
+            overflow: 'hidden', boxShadow: 'var(--shadow-3)'
           }}>
             <div style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '14px 18px', backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0'
+              padding: '14px 18px', backgroundColor: 'var(--surface-2)', borderBottom: '1px solid var(--border)'
             }}>
               <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>
                 تحديث سجل {formData.doc_name}
@@ -220,7 +221,7 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
 
             <form onSubmit={handleSave} style={{ padding: '18px' }} className="stack">
               {formError && (
-                <div style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', color: '#b91c1c', fontSize: '0.8rem' }}>
+                <div style={{ padding: '8px 12px', background: 'var(--overdue-soft)', border: '1px solid var(--overdue-line)', borderRadius: '6px', color: 'var(--overdue)', fontSize: '0.8rem' }}>
                   {formError}
                 </div>
               )}
@@ -234,7 +235,7 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
                   value={formData.doc_number}
                   onChange={(e) => setFormData((prev) => ({ ...prev, doc_number: e.target.value }))}
                   placeholder="رقم المستند الرسمي..."
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-inset)', fontSize: '0.85rem' }}
                 />
               </div>
 
@@ -247,7 +248,7 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
                     type="date"
                     value={formData.expiry_date}
                     onChange={(e) => setFormData((prev) => ({ ...prev, expiry_date: e.target.value }))}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-inset)', fontSize: '0.85rem' }}
                   />
                 </div>
 
@@ -259,7 +260,7 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
                     type="text"
                     value={formData.issuer}
                     onChange={(e) => setFormData((prev) => ({ ...prev, issuer: e.target.value }))}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-inset)', fontSize: '0.85rem' }}
                   />
                 </div>
               </div>
@@ -272,7 +273,7 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
                   type="text"
                   value={formData.assigned_role}
                   onChange={(e) => setFormData((prev) => ({ ...prev, assigned_role: e.target.value }))}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-inset)', fontSize: '0.85rem' }}
                 />
               </div>
 
@@ -284,7 +285,7 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
                   rows={2}
                   value={formData.notes}
                   onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-inset)', fontSize: '0.85rem' }}
                 />
               </div>
 
@@ -292,14 +293,14 @@ export default function CompanyDocumentsCard({ companyId, initialDocuments = [] 
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
-                  style={{ padding: '7px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '0.82rem', cursor: 'pointer' }}
+                  style={{ padding: '7px 14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)', fontSize: '0.82rem', cursor: 'pointer' }}
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#0284c7', color: '#fff', fontWeight: 700, fontSize: '0.82rem', cursor: saving ? 'not-allowed' : 'pointer' }}
+                  style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: 'var(--accent-ink)', fontWeight: 700, fontSize: '0.82rem', cursor: saving ? 'not-allowed' : 'pointer' }}
                 >
                   {saving ? 'جاري الحفظ...' : 'حفظ التعديلات'}
                 </button>

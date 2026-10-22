@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import useSWR from 'swr'
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
   Building2, CalendarClock, ClipboardList, CreditCard, Mail, Radio, ShieldAlert, Archive
 } from 'lucide-react'
@@ -20,14 +20,10 @@ const PRIORITY_LIMIT = 7
 
 export default function MissionBoard() {
   const { data, error, isLoading } = useSWR('/api/status', fetcher, { refreshInterval: 10000 })
-  const locale = numberLocaleFromCookie()
   const counts = data?.counts || {}
 
   const priority = useMemo(() => (data?.attention || []).slice(0, PRIORITY_LIMIT), [data])
   const today = formatDateWith(new Date(), { dateStyle: 'full' })
-  const heartbeatAge = data?.harness?.last_heartbeat ? Date.now() - Date.parse(data.harness.last_heartbeat) : Infinity
-  const harnessOnline = heartbeatAge < 180000
-  const managerOnline = Boolean(data?.controls?.assistantManagerEnabled) && data?.assistantManager?.state === 'online'
 
   const cells = [
     {
@@ -95,6 +91,31 @@ export default function MissionBoard() {
 
       {data && (
         <>
+          <section className="priority-panel" aria-labelledby="priority-title">
+            <div className="priority-head">
+              <div>
+                <span className="eyebrow">مرتّب حسب الأولوية</span>
+                <h2 id="priority-title">ما يحتاج انتباهك الآن</h2>
+              </div>
+              <span className="tag">
+                {number(counts.attentionTotal ?? data.attention.length)} مفتوح · نعرض {number(priority.length)}
+              </span>
+            </div>
+
+            {priority.length ? (
+              <ul className="priority-list">
+                {priority.map((item, index) => (
+                  <PriorityItem item={item} key={item.key} featured={index === 0} />
+                ))}
+              </ul>
+            ) : (
+              <div className="empty-state">
+                <strong>لا توجد تنبيهات مفتوحة</strong>
+                <span>كل شيء هادئ الآن. سنعرض هنا ما يستحق اهتمامك فور وروده.</span>
+              </div>
+            )}
+          </section>
+
           <nav className="summary-strip" aria-label="ملخص سريع — اضغط للانتقال">
             {cells.map((cell) => (
               <Link
@@ -113,61 +134,25 @@ export default function MissionBoard() {
             ))}
           </nav>
 
-          <section className="priority-panel" aria-labelledby="priority-title">
-            <div className="priority-head">
-              <div>
-                <span className="eyebrow">مرتّب حسب الأولوية</span>
-                <h2 id="priority-title">ما يحتاج انتباهك الآن</h2>
-              </div>
-              <span className="tag">
-                {number(counts.attentionTotal ?? data.attention.length)} مفتوح · نعرض {number(priority.length)}
-              </span>
-            </div>
-
-            {priority.length ? (
-              <ul className="priority-list">
-                {priority.map((item) => (
-                  <PriorityItem item={item} key={item.key} />
-                ))}
-              </ul>
-            ) : (
-              <div className="empty-state">
-                <strong>لا توجد تنبيهات مفتوحة</strong>
-                <span>كل شيء هادئ الآن. سنعرض هنا ما يستحق اهتمامك فور وروده.</span>
-              </div>
-            )}
-          </section>
-
           <div className="dashboard-columns">
-            <section className="dashboard-card">
+            <section className="dashboard-card dashboard-sync-card">
               <div className="card-heading">
-                <div><div className="eyebrow">حالة النظام</div><h2>المتابعة والقنوات</h2></div>
-                <Link href="/settings">خصّص ما يناسبك ←</Link>
+                <div><div className="eyebrow">لنبقيك على اطلاع</div><h2>آخر مراجعة لبياناتك</h2></div>
+                <Link href="/companies">شركاتك ←</Link>
               </div>
-              <div className="service-list">
-                <ServiceRow
-                  name="متابعة البوابة"
-                  state={harnessOnline ? 'تعمل' : 'غير متاحة'}
-                  good={harnessOnline}
-                />
-                <ServiceRow
-                  name="المساعد الآلي"
-                  state={managerOnline ? 'إلى جانبك' : 'متوقف'}
-                  good={managerOnline}
-                />
-                <ServiceRow
-                  name="المزامنة التلقائية"
-                  state={data.controls.automationEnabled
-                    ? `كل ${data.controls.automationIntervalMin} دقيقة`
-                    : 'متوقفة'}
-                  good={data.controls.automationEnabled}
-                />
-                <ServiceRow
-                  name="التنبيهات الخارجية"
-                  state={data.controls.liveDeliveryReady ? 'جاهزة للإرسال' : 'تبقى داخل التطبيق'}
-                  good={data.controls.liveDeliveryReady}
-                />
-              </div>
+              <strong className="dashboard-sync-time">
+                {data.lastScannedAt
+                  ? formatDateWith(data.lastScannedAt, { dateStyle: 'medium', timeStyle: 'short' })
+                  : 'لم تتم مراجعة البيانات بعد'}
+              </strong>
+              <span className="dashboard-sync-note">
+                {data.lastScannedAt
+                  ? 'هذا هو أحدث وقت مسجل لمراجعة بيانات الشركات.'
+                  : 'ابدأ مراجعة إحدى شركاتك لتظهر بياناتها هنا.'}
+                {counts.staleCompanies > 0
+                  ? ` قد تكون بيانات ${number(counts.staleCompanies)} شركة قديمة.`
+                  : ''}
+              </span>
               {counts.failures > 0 && (
                 <Link className="failure-link" href="/failures">
                   <ShieldAlert size={14} aria-hidden="true" />
@@ -224,14 +209,14 @@ export default function MissionBoard() {
   )
 }
 
-function PriorityItem({ item }) {
+function PriorityItem({ item, featured = false }) {
   const urgent = item.tone === 'urgent'
   const accent = urgent ? 'var(--overdue)' : 'var(--soon)'
   const soft = urgent ? 'var(--overdue-soft)' : 'var(--soon-soft)'
   const companyText = item.companyName || 'اسم غير مسجّل'
   return (
     <li
-      className="priority-item"
+      className={`priority-item${featured ? ' priority-item-featured' : ''}`}
       style={{ '--item-accent': accent, '--item-soft': soft }}
     >
       <i className="priority-rail" aria-hidden="true" />
@@ -263,18 +248,6 @@ function PriorityItem({ item }) {
   )
 }
 
-function ServiceRow({ name, state, good }) {
-  return (
-    <div className="service-row">
-      <div className="service-name">
-        <i className={`status-light ${good ? 'healthy' : 'offline'}`} aria-hidden="true" />
-        {name}
-      </div>
-      <span className="service-state">{state}</span>
-    </div>
-  )
-}
-
 function number(value) {
   const count = Number(value || 0)
   return (Number.isFinite(count) ? count : 0).toLocaleString(numberLocaleFromCookie())
@@ -282,7 +255,7 @@ function number(value) {
 
 function relativeLabel(value) {
   const timestamp = Date.parse(value)
-  if (Number.isNaN(timestamp)) return '—'
+  if (Number.isNaN(timestamp)) return 'الوقت غير متاح'
   const minutes = Math.floor(Math.max(0, Date.now() - timestamp) / 60000)
   if (minutes < 1) return 'الآن'
   if (minutes < 60) return `قبل ${number(minutes)} دقيقة`

@@ -270,14 +270,14 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
                 alignItems: 'center',
                 gap: '6px',
                 padding: '9px 18px',
-                backgroundColor: '#0284c7',
+                backgroundColor: 'var(--accent)',
                 border: 'none',
-                color: '#fff',
+                color: 'var(--accent-ink)',
                 borderRadius: '8px',
                 cursor: 'pointer',
                 fontWeight: 700,
                 fontSize: '0.85rem',
-                boxShadow: '0 2px 6px rgba(2, 132, 199, 0.4)'
+                boxShadow: 'var(--shadow-1)'
               }}
             >
               <Plus size={16} />
@@ -294,61 +294,61 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
           marginTop: '20px'
         }}>
           <div style={{
-            backgroundColor: 'rgba(255,255,255,0.06)',
+            backgroundColor: 'var(--surface-2)',
             padding: '12px 16px',
             borderRadius: '8px',
-            border: '1px solid rgba(255,255,255,0.1)'
+            border: '1px solid var(--border)'
           }}>
             <div style={{ fontSize: '0.8rem', opacity: 0.75 }}>إجمالي الوثائق المقيدة</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: '#38bdf8' }}>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: 'var(--info)' }}>
               {stats.total ?? documents.length}
             </div>
           </div>
 
           <div style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            backgroundColor: 'var(--overdue-soft)',
             padding: '12px 16px',
             borderRadius: '8px',
-            border: '1px solid rgba(239, 68, 68, 0.3)'
+            border: '1px solid var(--overdue-line)'
           }}>
-            <div style={{ fontSize: '0.8rem', color: '#fca5a5' }}>منتهية الصلاحية (تحتاج تجديد) 🚨</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: '#f87171' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--overdue)' }}>منتهية الصلاحية (تحتاج تجديد) 🚨</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: 'var(--overdue)' }}>
               {stats.expired ?? 0}
             </div>
           </div>
 
           <div style={{
-            backgroundColor: 'rgba(234, 179, 8, 0.12)',
+            backgroundColor: 'var(--soon-soft)',
             padding: '12px 16px',
             borderRadius: '8px',
-            border: '1px solid rgba(234, 179, 8, 0.3)'
+            border: '1px solid var(--soon-line)'
           }}>
-            <div style={{ fontSize: '0.8rem', color: '#fef08a' }}>توشك على الانتهاء (خلال 60 يوم) ⏳</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: '#facc15' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--soon)' }}>توشك على الانتهاء (خلال 60 يوم) ⏳</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: 'var(--soon)' }}>
               {stats.expiringSoon ?? 0}
             </div>
           </div>
 
           <div style={{
-            backgroundColor: 'rgba(34, 197, 94, 0.12)',
+            backgroundColor: 'var(--done-soft)',
             padding: '12px 16px',
             borderRadius: '8px',
-            border: '1px solid rgba(34, 197, 94, 0.3)'
+            border: '1px solid var(--done-line)'
           }}>
-            <div style={{ fontSize: '0.8rem', color: '#86efac' }}>سارية وصالحة ✅</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: '#4ade80' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--done)' }}>سارية وصالحة ✅</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: 'var(--done)' }}>
               {stats.valid ?? 0}
             </div>
           </div>
 
           <div style={{
-            backgroundColor: 'rgba(148, 163, 184, 0.12)',
+            backgroundColor: 'var(--neutral-soft)',
             padding: '12px 16px',
             borderRadius: '8px',
-            border: '1px solid rgba(148, 163, 184, 0.2)'
+            border: '1px solid var(--neutral-line)'
           }}>
             <div style={{ fontSize: '0.8rem', opacity: 0.75 }}>بانتظار تسجيل التاريخ 📋</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: '#cbd5e1' }}>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, marginTop: '4px', color: 'var(--neutral)' }}>
               {stats.noDate ?? 0}
             </div>
           </div>
@@ -360,7 +360,7 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
           {/* Search box */}
           <div style={{ position: 'relative', flex: '1 1 240px' }}>
-            <Search size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+            <Search size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-4)' }} />
             <input
               type="text"
               value={query}
@@ -370,7 +370,8 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
                 width: '100%',
                 padding: '9px 36px 9px 12px',
                 borderRadius: '8px',
-                border: '1px solid #cbd5e1',
+                border: '1px solid var(--border)',
+                backgroundColor: 'var(--surface-inset)',
                 fontSize: '0.85rem'
               }}
             />
@@ -383,9 +384,9 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
             style={{
               padding: '9px 12px',
               borderRadius: '8px',
-              border: '1px solid #cbd5e1',
+              border: '1px solid var(--border)',
               fontSize: '0.85rem',
-              backgroundColor: '#fff',
+              backgroundColor: 'var(--surface-inset)',
               minWidth: '180px'
             }}
           >
@@ -402,9 +403,9 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
             style={{
               padding: '9px 12px',
               borderRadius: '8px',
-              border: '1px solid #cbd5e1',
+              border: '1px solid var(--border)',
               fontSize: '0.85rem',
-              backgroundColor: '#fff',
+              backgroundColor: 'var(--surface-inset)',
               minWidth: '180px'
             }}
           >
@@ -416,7 +417,7 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
         </div>
 
         {/* Status Filter Tabs */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px', borderTop: '1px solid var(--border-soft)', paddingTop: '10px' }}>
           {[
             { id: 'all', label: 'جميع الحالات' },
             { id: 'expired', label: '🚨 منتهية الصلاحية' },
@@ -434,9 +435,9 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
                 fontSize: '0.8rem',
                 fontWeight: 600,
                 border: '1px solid',
-                borderColor: selectedStatus === tab.id ? '#0284c7' : '#e2e8f0',
-                backgroundColor: selectedStatus === tab.id ? '#e0f2fe' : '#f8fafc',
-                color: selectedStatus === tab.id ? '#0369a1' : '#475569',
+                borderColor: selectedStatus === tab.id ? 'var(--accent-line)' : 'var(--border)',
+                backgroundColor: selectedStatus === tab.id ? 'var(--accent-soft)' : 'var(--surface-2)',
+                color: selectedStatus === tab.id ? 'var(--accent)' : 'var(--text-2)',
                 cursor: 'pointer'
               }}
             >
@@ -453,9 +454,9 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
         gap: '16px'
       }}>
         {filtered.length === 0 ? (
-          <div className="panel" style={{ gridColumn: '1 / -1', padding: '40px 20px', textAlign: 'center', color: '#64748b' }}>
+          <div className="panel" style={{ gridColumn: '1 / -1', padding: '40px 20px', textAlign: 'center', color: 'var(--text-3)' }}>
             <FileText size={42} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-            <h3 style={{ margin: '0 0 6px', color: '#1e293b' }}>لا توجد وثائق تطابق هذا التصفية</h3>
+            <h3 style={{ margin: '0 0 6px', color: 'var(--text)' }}>لا توجد وثائق تطابق هذا التصفية</h3>
             <p style={{ margin: 0, fontSize: '0.85rem' }}>يمكنك إضافة وثيقة جديدة أو تغيير شروط البحث.</p>
           </div>
         ) : (
@@ -464,6 +465,7 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
             return (
               <article
                 key={doc.id}
+                className="archive-document-card"
                 style={{
                   backgroundColor: 'var(--surface)',
                   borderRadius: '10px',
@@ -540,35 +542,35 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
                   }}>
                     {doc.doc_number ? (
                       <div style={{ display: 'flex', gap: '6px' }}>
-                        <span style={{ fontWeight: 600, color: '#475569', minWidth: '85px' }}>رقم الوثيقة:</span>
-                        <span style={{ fontWeight: 700, color: '#0f172a' }}>{doc.doc_number}</span>
+                        <span style={{ fontWeight: 600, color: 'var(--text-3)', minWidth: '85px' }}>رقم الوثيقة:</span>
+                        <span style={{ fontWeight: 700, color: 'var(--text)' }}>{doc.doc_number}</span>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', gap: '6px', color: '#94a3b8' }}>
+                      <div style={{ display: 'flex', gap: '6px', color: 'var(--text-4)' }}>
                         <span style={{ minWidth: '85px' }}>رقم الوثيقة:</span>
                         <span>غير مدخل بعد</span>
                       </div>
                     )}
 
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <span style={{ fontWeight: 600, color: '#475569', minWidth: '85px' }}>تاريخ الانتهاء:</span>
-                      <span style={{ fontWeight: 700, color: doc.expiry_date ? '#0f172a' : '#94a3b8' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--text-3)', minWidth: '85px' }}>تاريخ الانتهاء:</span>
+                      <span style={{ fontWeight: 700, color: doc.expiry_date ? 'var(--text)' : 'var(--text-4)' }}>
                         {doc.expiry_date || 'غير محدد'}
                       </span>
                     </div>
 
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <span style={{ fontWeight: 600, color: '#475569', minWidth: '85px' }}>جهة الإصدار:</span>
-                      <span style={{ color: '#334155' }}>{doc.issuer || 'مصلحة الضرائب / السجل التجاري'}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-3)', minWidth: '85px' }}>جهة الإصدار:</span>
+                      <span style={{ color: 'var(--text-2)' }}>{doc.issuer || 'مصلحة الضرائب / السجل التجاري'}</span>
                     </div>
 
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
-                      <span style={{ fontWeight: 700, color: '#0369a1', minWidth: '85px' }}>👤 المسؤول:</span>
+                      <span style={{ fontWeight: 700, color: 'var(--info)', minWidth: '85px' }}>👤 المسؤول:</span>
                       <span style={{
                         fontSize: '0.75rem',
                         fontWeight: 700,
-                        backgroundColor: '#e0f2fe',
-                        color: '#0369a1',
+                        backgroundColor: 'var(--info-soft)',
+                        color: 'var(--info)',
                         padding: '2px 8px',
                         borderRadius: '4px'
                       }}>
@@ -602,7 +604,7 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
                     )}
 
                     {(doc.source === 'portal_sync' || doc.source === 'portal_pdf') && (
-                      <div style={{ fontSize: '0.72rem', color: '#0284c7', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--accent)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <ShieldCheck size={13} />
                         <span>مزامنة مباشرة مع بوابة الضرائب الرسمية</span>
                       </div>
@@ -658,7 +660,7 @@ export default function ArchiveView({ initialDocuments = [], companies = [], sta
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(15, 23, 42, 0.65)',
+          backgroundColor: 'color-mix(in srgb, var(--canvas) 76%, transparent)',
           backdropFilter: 'blur(3px)',
           display: 'flex',
           alignItems: 'center',
