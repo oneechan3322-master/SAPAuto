@@ -22,10 +22,14 @@ export async function POST(request) {
   const key = `${authz.session.user.id}:${targetType}:${targetId}:${new Date(dueAt).toISOString()}`
   const reminderId = id('reminder')
   try {
+    const companyId = targetType === 'obligation' ? db.prepare('SELECT company_id FROM obligations WHERE id=?').get(targetId)?.company_id
+      : targetType === 'payment' ? db.prepare('SELECT company_id FROM payments WHERE id=?').get(targetId)?.company_id
+      : targetType === 'task' ? db.prepare('SELECT company_id FROM tasks WHERE id=?').get(targetId)?.company_id
+      : null
     db.transaction(() => {
-      db.prepare(`INSERT INTO reminders(id,target_type,target_id,user_id,due_at,channel,dedupe_key,created_at)
-        VALUES(?,?,?,?,?,'launcher',?,?)`)
-        .run(reminderId, targetType, targetId, authz.session.user.id, new Date(dueAt).toISOString(), key, now())
+      db.prepare(`INSERT INTO reminders(id,target_type,target_id,user_id,due_at,channel,dedupe_key,created_at,company_id)
+        VALUES(?,?,?,?,?,'launcher',?,?,?)`)
+        .run(reminderId, targetType, targetId, authz.session.user.id, new Date(dueAt).toISOString(), key, now(), companyId || null)
       audit(db, { actorId: authz.session.user.id, action: 'reminder.created', entityType: targetType, entityId: targetId, details: { reminderId } })
     })()
   } catch (error) {

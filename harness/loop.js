@@ -40,9 +40,10 @@ async function scanOne(account, index, total, db, scanner) {
       consecutive_failures=excluded.consecutive_failures,parked_until=excluded.parked_until,
       last_error=excluded.last_error,updated_at=excluded.updated_at`)
       .run(account.username, parkedUntil ? 'parked' : 'failed', failures, parkedUntil, String(error.message).slice(0, 500), timestamp)
-    db.prepare(`INSERT INTO failures(id,account_key,occurred_at,reason,hint)
-      VALUES(?,?,?,?,?)`).run(id('failure'), account.username, timestamp, String(error.message).slice(0, 500),
-      'راجع بيانات الدخول والاتصال، ثم أعد المحاولة بعد التحقق.')
+    const companyRow = db.prepare('SELECT id FROM companies WHERE account_key=?').get(account.username)
+    db.prepare(`INSERT INTO failures(id,account_key,occurred_at,reason,hint,company_id)
+      VALUES(?,?,?,?,?,?)`).run(id('failure'), account.username, timestamp, String(error.message).slice(0, 500),
+      'راجع بيانات الدخول والاتصال، ثم أعد المحاولة بعد التحقق.', companyRow ? companyRow.id : null)
     if (parkedUntil) db.prepare(`INSERT INTO events(id,kind,account_key,payload,created_at)
       VALUES(?,?,?,?,?)`).run(id('event'), 'account_parked', account.username, JSON.stringify({ parkedUntil }), timestamp)
     console.error(`Account scan failed (${account.username}): ${error.message}`)
