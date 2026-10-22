@@ -16,7 +16,17 @@ if (provider !== 'gemma4') {
 
 const root = path.resolve(__dirname, '..')
 const modelStorage = path.resolve(root, process.env.V8_LOCAL_MODEL_HOME || '../pet')
-const modelFile = path.join(modelStorage, 'models', 'gemma-4-E2B-it-Q4_0.gguf')
+// Model Center (v8.2): the dashboard's selection lives in the DB settings —
+// settings-first, env fallback. A "switch + apply" from the dashboard restarts
+// this service with the chosen weights without any terminal touching.
+let modelFile
+try {
+  const { getDatabase } = require('../db/connect')
+  const selected = getDatabase().prepare("SELECT value FROM settings WHERE key='local_model_file'").get()?.value
+  const candidate = selected ? path.join(modelStorage, 'models', selected) : null
+  if (candidate && fs.existsSync(candidate)) modelFile = candidate
+} catch { /* DB not reachable: fall through to the built-in default */ }
+if (!modelFile) modelFile = path.join(modelStorage, 'models', 'gemma-4-E2B-it-Q4_0.gguf')
 const serverScript = path.join(__dirname, 'local-model-server.py')
 const uv = process.env.V8_UV_BIN ||
   path.join(process.env.USERPROFILE || '', '.local', 'bin', 'uv.exe')
