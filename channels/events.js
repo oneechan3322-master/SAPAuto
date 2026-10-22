@@ -351,6 +351,27 @@ function checkHarnessOffline(db = getDatabase(), currentTime = Date.now()) {
   return false
 }
 
+// A10 legacy-junk archive — the dispatcher backlog (announced=0) only drains
+// when a user channel actually exists, so events with no delivery path pile
+// up as pending rows forever. Older-than-TTL pending events move to
+// `archived_at` (migration 036): they leave the live delivery path yet stay
+// in the database for review and backups. Kinds that legitimately WAIT are
+// never archived: a reminder_due event is the delivery vessel for its
+// pending reminder (re-enqueued with INSERT OR IGNORE under the same id —
+// an archived row would be silently dead), and report_requested belongs to
+// the reports flow that the Owner may revive.
+const ARCHIVE_EXEMPT_KINDS = new Set(['reminder_due', 'report_requested'])
+const ARCHIVE_TTL_DAYS = 7
+
+function archiveStaleEvents(db, { cutoffDays = ARCHIVE_TTL_DAYS, currentDate = new Date() } = {}) {
+  const cutoff = new Date(currentDate.getTime() - cutoffDays * 24 * 60 * 60 * 1000).toISOString()
+  const result = db.prepare(`UPDATE events
+    SET archived_at=? WHERE announced=0 AND archived_at='' AND created_at < ?
+    AND kind NOT IN (${[...ARCHIVE_EXEMPT_KINDS].map(() => '?').join(',')})`)
+    .run(now(), cutoff, ...ARCHIVE_EXEMPT_KINDS)
+  return result.changes
+}
+
 function startEventDispatcher(providers, { db = getDatabase(), intervalMs = 10000 } = {}) {
   let busy = false
   const timer = setInterval(async () => {
@@ -359,7 +380,8 @@ function startEventDispatcher(providers, { db = getDatabase(), intervalMs = 1000
     try {
       checkHarnessOffline(db)
       enqueueDueReminders(db)
-      const events = db.prepare(`SELECT * FROM events WHERE announced=0
+      archiveStaleEvents(db)
+      const events = db.prepare(`SELECT * FROM events WHERE announced=0 AND archived_at=''
         ORDER BY CASE WHEN kind IN ('assistant_attention','harness_offline','reminder_due','report_requested') THEN 0 ELSE 1 END,
         created_at LIMIT 60`).all()
       if (events.length) {
@@ -382,4 +404,4 @@ function startEventDispatcher(providers, { db = getDatabase(), intervalMs = 1000
   return () => clearInterval(timer)
 }
 
-module.exports = { deliverEvent, startEventDispatcher, checkHarnessOffline, enqueueDueReminders, messageMode, outboxMode }
+module.exports = { deliverEvent, startEventDispatcher, checkHarnessOffline, enqueueDueReminders, messageMode, outboxMode, archiveStaleEvents, ARCHIVE_EXEMPT_KINDS, ARCHIVE_TTL_DAYS }
