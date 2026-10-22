@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url)
 const { verifyAndFetchCompanyName } = require('../../../../../harness/verifier.js')
 
 export async function POST(request) {
-  const authz = await requireRole(request, 'Admin')
+  const authz = await requireRole(request, 'Owner')
   if (authz.response) return authz.response
 
   let body

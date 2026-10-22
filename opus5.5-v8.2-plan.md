@@ -11,6 +11,13 @@ Rule for this document: it contains no code. Every change is written as a task c
 
 From your Task Manager screenshot: Intel Xeon E5-2683 v3 (Haswell, 1 socket, 14 cores / 28 threads, 2.0 GHz base, 35 MB L3), 31.9 GB RAM with 6.6 GB in use, no GPU, virtualization off, uptime 72 days.
 
+**Amendment (22 Oct 2026, task L0.1 actually ran):** the machine SAPAuto currently runs on is *not* the Xeon box — `docs/hardware-report.md` records an **Intel Core i7-10850H laptop (6C/12T) with 16 GB installed in only 1 of 2 DIMM slots, ~13 GB already in use, Drive C at 17% free, power plan Balanced**. On this machine a 26B A4B Senior (~14.4 GB of weights) cannot be resident. Consequences:
+
+- Model roles become **machine profiles expressed in `models.json`** (Task L2), not global constants. Profile `laptop-16gb`: Senior = E4B only if bench numbers allow, otherwise E2B; Clerk = E2B. Profile `server-32gb` (the Xeon, current or future home): Senior = 26B A4B as written below; Clerk = E2B.
+- The portability track (Track A) is what makes the Senior upgrade possible: the app must run on the stronger box unchanged, with only `models.json` differing per profile. Until the app lives on a machine that fits the Senior, the night-study and verdict scope shrinks to what E2B/E4B can do, and C.3's rules engine carries more of the weight than the AI adjudication step.
+- Two immediatehost fixes from the report: memory channel 2 is unpopulated (the single cheapest bandwidth upgrade) and the power plan is Balanced (throttles between inferences).
+- The clock/timezone and disk checks in the Doctor remain as written; the report shows Egypt Standard Time (correct) and a disk above the 15% floor.
+
 The CPU supports AVX2 and FMA but not AVX-512. That suits llama.cpp's standard Windows x64 CPU build. With virtualization off you can't use WSL2 or Docker. That's fine, because everything in this plan runs as a native Windows executable, which also helps make the app portable.
 
 On CPU, generation speed depends on memory bandwidth. This chip supports quad-channel DDR4-2133 at up to 68 GB/s (TechPowerUp), but only if all 4 channels have a DIMM. If your 32 GB is two 16 GB sticks, you get half the bandwidth and roughly half the model speed. Task L0.1 checks this first.
@@ -68,22 +75,25 @@ One main file, `SAPAuto.cmd`, opens a numbered Arabic/English menu. Each menu op
 
 DPAPI-encrypted secrets only decrypt on the same machine under the same Windows user. Your accounts AES key file has the opposite problem: whoever copies the folder gets everything. Both break real portability.
 
-The design: one vault holding a random master key. On each machine, the master key is wrapped with DPAPI so day-to-day running needs no password. There is also a recovery copy wrapped with a passphrase that only the Owner knows (Argon2id key derivation). When the app is moved, the new machine detects that DPAPI unwrap fails and asks for the recovery passphrase once, then re-wraps with that machine's DPAPI. All credentials go through this one vault: ETA accounts, Gmail, Telegram, MCP token, and the Playwright session states. That retires both the separate `accounts.key` file and the split DPAPI store.
+The design: one vault holding a random master key. On each machine, the master key is wrapped with DPAPI so day-to-day running needs no password. There is also a recovery copy wrapped with a passphrase that only the Owner knows (Argon2id key derivation). When the app is moved, the new machine detects that DPAPI unwrap fails and asks for the recovery passphrase once, then re-wraps with that machine's DPAPI. All credentials go through this one vault: ETA accounts, Gmail, Telegram, MCP token, and — reserved namespaced, migrated when session reuse ships — the Playwright session states. That retires both the separate `accounts.key` file and the split DPAPI store.
+
+**Migration/dependence note:** A5 must migrate *existing* secret stores (ETA accounts from `data/accounts.key`, Gmail/Telegram from `channels/secure-store.js`, MCP token from `.env`) and keep running if the vault is empty. Autostart (A6) must run the task **as the same interactive Windows user** that wraps the vault — a service-account autostart would fail every DPAPI unwrap at boot. The Doctor verifies "autostart task user == vault DPAPI user".
 
 ### A.4 Doctor checks
 
 - CPU has AVX2.
-- Free RAM is at least what models.json needs plus 4 GB.
-- Ports 3000/3101/7799 are free.
+- Free RAM is at least what models.json needs plus 4 GB. For the current laptop profile this check must fail loudly if the Senior weights of a configured model exceed free RAM at startup — the RAM guard, not Windows paging, decides.
+- Ports 3000/3101/7799 **and 7798** are free.
 - Node version matches.
 - Chromium is present.
 - Each model's SHA-256 matches the manifest.
 - DB `integrity_check` passes.
 - Disk has at least 15% free.
-- Time zone is Africa/Cairo and the clock is in sync.
+- Time zone is Cairo/Egypt and the clock is in sync.
 - The vault unlocks.
 - The power plan is High Performance.
 - Memory channel population is reported as a warning only.
+- Autostart task user matches the vault DPAPI user (warning if the task is registered under a different account).
 
 Every failure gives a fix-it sentence in Arabic.
 
@@ -151,9 +161,11 @@ New tables, which the local model writes as expand-only migrations:
 - `obligation_verdicts`
 - `insights`
 - `ai_jobs` (the queue)
-- `llm_cache`
+- `llm_cache` (keys are namespaced by company + task kind so one company's verdict never leaks into another's prompt)
 - `assistant_conversations`
 - `ai_feedback`
+- `model_benchmarks` (Track L results — live in the C.1 migration batch so the bench script has somewhere to write)
+- `company_assignments` (accountant↔company join table, the join point between the staff assignment in Track B and the escalation rules)
 
 ### C.2 Reading everything (the document pipeline)
 
@@ -221,12 +233,12 @@ Google publishes official QAT Q4_0 GGUF builds of every Gemma 4 size for llama.c
 
 Why not the 31B dense model: it needs about 17.5 GB, and on a CPU every one of its 31B parameters is used for every token. It would be several times slower than 26B A4B on this machine.
 
-### D.2 RAM budget (32 GB)
+### D.2 RAM budget (32 GB profile — re-run the numbers with docs/hardware-report.md per machine)
 
-OS plus current services use about 6.6 GB. Senior with 2 slots and a moderate context is about 16–18 GB. Clerk is about 3.5 GB. Three Playwright contexts are about 1.5–2 GB. That totals roughly 28–30 GB, which is tight but workable. The rules:
+On the Xeon profile: OS plus current services use about 6.6 GB. Senior with 2 slots and a moderate context is about 16–18 GB. Clerk is about 3.5 GB. Three Playwright contexts are about 1.5–2 GB. That totals roughly 28–30 GB, which is tight but workable. On the current laptop profile (16 GB, ~13 GB in use) the Senior as specced cannot be resident — the profile in models.json picks the smaller model instead (see §0). The rules:
 
 - Clerk context is capped at 8k tokens.
-- Senior runs 2 parallel slots of 16k each (measure, then adjust).
+- Senior runs **one llama-server instance with 2 parallel slots of 16k each** (measure, then adjust). "Never two heavy inferences at once" (D.3) governs across models; parallel slots live inside the one Senior server binary, not as separate servers.
 - When RAM is under pressure, the job queue pauses AI jobs rather than letting Windows swap.
 - The coder model is only loaded in the coding window, with the Senior unloaded.
 - If you ever add RAM, 64 GB makes everything comfortable. It's the cheapest upgrade with the biggest impact.
@@ -276,7 +288,7 @@ You asked that the local LLM write the code. That's workable only with small, te
 3. Write the tests from the card's "done when" section first.
 4. Write the smallest change that makes them pass. Produce a diff, not whole files.
 5. Run the full test suite. If it fails twice, stop and write a short note on what's blocking.
-6. Save the result to `code_upgrade_proposals` for Owner approval. Never apply changes directly to `current`.
+6. Save the result to `code_upgrade_proposals` for Owner approval. Never apply changes directly to `current`. Approvals are applied only through the **gated apply script**: it re-verifies every diff against the checksums recorded at approval time, refuses to apply if the target files changed since (re-request approval instead), and runs the relevant test files before and after flipping the pointer.
 7. Run it through OpenCode pointed at the local llama-server (OpenAI-compatible) in an isolated copy of the repo. No `.env`, `data`, or `.wwebjs_auth` directories in that copy.
 
 ### E.2 Task card template (every card in TASKS.md follows this)
@@ -304,18 +316,22 @@ ID · Track · Goal (one sentence) · Why · Files allowed to touch (at most 4) 
 | L2 | Add the Clerk server on 7798, plus models.json with SHA-256 | Doctor checks the hashes; both servers pass health checks |
 | L3 | `ai_jobs` queue with priorities, leases, RAM guard, day/night windows | Load test: an interactive question is answered while the nightly study runs |
 | L4 | LLM router with local-only routing for client data, circuit breaker, `llm_cache` | Killing the model causes deferred jobs, not crashes |
+| L5 | Fix log hygiene: pino-roll writes `logs/*.1.log` files that stay 0 bytes (all services only log through PM2 stdout today). Either fix the roll transport or remove it and name the PM2 log files per app — they currently share names with the old v8 apps and get stale lines mixed in. | Every running service writes to exactly one current log file with this week's lines; no 0-byte shadows |
 
 ### Track A: portable app
 
 | ID | Task | Done when |
 |---|---|---|
 | A1 | Portable folder layout and path resolution relative to the folder | The app runs from `E:\Test\SAPAuto` without changes |
-| A2 | Bundle runtimes (Node zip, Chromium via env var, llama binaries) | It starts on a clean Windows VM with nothing installed |
+| A2 | Bundle runtimes (Node zip, Chromium via env var, llama binaries, an announcement this needs the VC++ 2015-2022 x64 redistributable or a bundled copy, and PM2 as a *.cmd shim in the folder — no global npm install) | It starts on a clean Windows VM with nothing installed |
 | A3 | `SAPAuto.cmd` menu plus the individual scripts from A.2 | Every menu option works and messages are in Arabic |
 | A4 | Doctor | Each failed check produces an Arabic fix-it message |
 | A5 | Unified vault (DPAPI wrap plus passphrase recovery), migrating the existing secrets | Moving to a second machine asks for the passphrase once, then everything works |
 | A6 | Autostart through Task Scheduler with the folder path | A reboot with nobody logged in brings everything back within 3 minutes |
 | A7 | Update/Rollback with side-by-side releases | A broken release is rolled back automatically by the health check |
+| A8 | LAN access through Caddy with a self-signed CA, TLS, and a bearer token (prerequisite for B5) | A staff phone opens the dashboard over the LAN without tunnel.html |
+| A9 | Nightly backup: zip the data folder and DB to a second drive, with a scheduled restore drill | A restore test succeeds on a scratch folder and the drill is recorded |
+| A10 | Legacy junk archive: move dead flows and the ~70 stale pending events out of the live delivery path | The events dispatcher backlog holds only current, deliverable events; the archive is preserved in backup |
 
 ### Track B: secretary experience
 
@@ -326,9 +342,9 @@ ID · Track · Goal (one sentence) · Why · Files allowed to touch (at most 4) 
 | B2 | Today screen | All of today's work is visible without opening another page |
 | B3 | Company dossier | All 8 sections described in B.2 render with source, last-seen and confidence labels |
 | B4 | Review queue with accept/reject/correct feeding memory | One correction creates a memory item and an audit row |
-| B5 | Staff assignment per company, plus escalation | Each accountant sees only their companies by default |
+| B5 | Staff assignment per company, plus escalation (requires A8: staff reach the LAN URL through Caddy with TLS and a token — build A8 first) | Each accountant sees only their companies by default |
 | B6 | Morning briefing per accountant | Arrives at 08:30 on that accountant's channel |
-| B7 | Weekly client report as an Arabic PDF with an approval step | Nothing goes to a client without approval |
+| B7 | Weekly client report as an Arabic PDF with an approval step (render with Playwright `page.pdf()` — Chromium handles Arabic shaping, ligatures and RTL natively; do not use a PDF library that re-shapes text) | Nothing goes to a client without approval |
 | B8 | Data health page | Stale sections are flagged in red with the date of the last good scan |
 | B9 | Calendar plus .ics export | Opens correctly in Outlook |
 
@@ -352,8 +368,9 @@ ID · Track · Goal (one sentence) · Why · Files allowed to touch (at most 4) 
 
 | ID | Task | Done when |
 |---|---|---|
-| S1 | Change `requireRole('Admin')` to `'Owner'` at the 4 sites | A test proves a Viewer gets a 403 |
-| S2 | Remove `V8_OPEN_ACCESS` | The dashboard requires login |
+| S1 | Change `requireRole('Admin')` to `'Owner'` at the 4 sites (**done 22 Oct**: routes fixed + regression tests in `test/plan-v82-s1.test.js`) | A test proves a Viewer gets a 403 |
+| S2 | Remove `V8_OPEN_ACCESS` (only after S.A11 below passes) | The dashboard requires login |
+| S.A11 | Pre-S2 verification: open the dashboard and complete the setup/first-login path end-to-end (setup route, first Owner creation, login) while access is still open, so removing the bypass can't lock the Owner out | Owner logs in on a fresh browser profile and the session survives a reload |
 | S3 | Login rate limit plus TOTP for Owner actions | Live mode and account changes require TOTP |
 | S4 | MCP tools least-privilege (read-only by default) | Write tools need explicit enabling |
 
@@ -362,10 +379,10 @@ ID · Track · Goal (one sentence) · Why · Files allowed to touch (at most 4) 
 ## 7. Order and milestones
 
 - **Week 1:** L0.1, L0.2 (decide using real numbers), S1–S2, B0.
-- **Weeks 2–3:** L1–L4, A1–A4, B1. Milestone: the app is portable and starts with one click, and the coverage gaps are fixed.
-- **Weeks 4–5:** C1–C5, A5–A6, B2–B3. Milestone: every document is read, and rule-based verdicts appear in the dossier.
+- **Weeks 2–3:** L1–L4, L5, A1–A4, B1. Milestone: the app is portable and starts with one click, and the coverage gaps are fixed.
+- **Weeks 4–5:** C1–C5, A5–A6, A8, B2–B3. Milestone: every document is read, and rule-based verdicts appear in the dossier. LAN staff access (A8) lands before any staff-facing screen (B5).
 - **Weeks 6–7:** C6–C8, B4–B6, S3–S4. Milestone: a separate memory per company, the nightly study, and the review queue are live.
-- **Weeks 8–9:** C9–C11, B7–B9, A7. Milestone: "Digital Secretary" v8.2. Backfill done, morning briefings running.
+- **Weeks 8–9:** C9–C11, B7–B9, A7, A9, A10. Milestone: "Digital Secretary" v8.2. Backfill done, morning briefings running, backups drilled.
 
 **Definition of done for v8.2:**
 

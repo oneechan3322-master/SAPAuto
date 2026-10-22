@@ -61,7 +61,7 @@ export async function GET(request) {
 
 /* POST /api/accounts — create a new account */
 export async function POST(request) {
-  const authz = await requireRole(request, 'Admin')
+  const authz = await requireRole(request, 'Owner')
   if (authz.response) return authz.response
 
   let body
@@ -104,7 +104,7 @@ export async function POST(request) {
 
 /* PATCH /api/accounts — edit label, username, enabled, optionally new password */
 export async function PATCH(request) {
-  const authz = await requireRole(request, 'Admin')
+  const authz = await requireRole(request, 'Owner')
   if (authz.response) return authz.response
 
   let body
@@ -153,7 +153,7 @@ export async function PATCH(request) {
 
 /* DELETE /api/accounts?key=ACCOUNT_KEY — permanently remove an account */
 export async function DELETE(request) {
-  const authz = await requireRole(request, 'Admin')
+  const authz = await requireRole(request, 'Owner')
   if (authz.response) return authz.response
 
   const key = new URL(request.url).searchParams.get('key')
