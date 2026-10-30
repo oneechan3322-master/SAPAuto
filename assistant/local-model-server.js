@@ -27,9 +27,6 @@ try {
   if (candidate && fs.existsSync(candidate)) modelFile = candidate
 } catch { /* DB not reachable: fall through to the built-in default */ }
 if (!modelFile) modelFile = path.join(modelStorage, 'models', 'gemma-4-E2B-it-Q4_0.gguf')
-const serverScript = path.join(__dirname, 'local-model-server.py')
-const uv = process.env.V8_UV_BIN ||
-  path.join(process.env.USERPROFILE || '', '.local', 'bin', 'uv.exe')
 
 if (!fs.existsSync(modelFile)) {
   console.error(`Local Gemma weights were not found at ${modelFile}`)
@@ -43,44 +40,79 @@ catch (error) {
   process.exit(1)
 }
 
-const childEnv = {
-  PATH: process.env.PATH || '',
-  SystemRoot: process.env.SystemRoot || '',
-  WINDIR: process.env.WINDIR || '',
-  ComSpec: process.env.ComSpec || '',
-  PATHEXT: process.env.PATHEXT || '',
-  USERPROFILE: process.env.USERPROFILE || '',
-  APPDATA: process.env.APPDATA || '',
-  LOCALAPPDATA: process.env.LOCALAPPDATA || '',
-  TEMP: process.env.TEMP || '',
-  TMP: process.env.TMP || '',
-  PYTHONUTF8: '1',
-  PYTHONIOENCODING: 'utf-8',
-  V8_LOCAL_AI_HOST: '127.0.0.1',
-  V8_LOCAL_AI_PORT: port,
-  V8_LOCAL_MODEL_FILE: modelFile,
-  V8_LOCAL_AI_TOKEN: process.env.V8_LOCAL_AI_TOKEN || ''
+// Native llama.cpp runtime (v8.2 Track A: remove Python entirely). The Windows
+// CPU build was installed with the Owner's OK at ..\llama\; the same candidate
+// order as scripts/bench-models.js keeps one source of truth:
+function resolveLlamaServer() {
+  const candidates = [
+    process.env.V8_LLAMA_SERVER || '',
+    path.join(root, 'llama-server.exe'),
+    path.join(root, '..', 'llama', 'llama-server.exe')
+  ].filter(Boolean)
+  for (const c of candidates) if (fs.existsSync(c)) return c
+  return null
+}
+
+const serverExe = resolveLlamaServer()
+if (!serverExe) {
+  console.error('llama-server.exe was not found (looked in project root, ..\\llama\\ and V8_LLAMA_SERVER)')
+  process.exit(1)
 }
 
 const args = [
-  'run', '--no-project', '--python', '3.13',
-  '--with', 'llama-cpp-python==0.3.36',
-  '--extra-index-url', 'https://abetlen.github.io/llama-cpp-python/whl/cpu',
-  'python', serverScript
+  '-m', modelFile,
+  '--host', '127.0.0.1',
+  '--port', String(port),
+  // The python era served llama-cpp defaults; 8192 + jinja keeps the Gemma chat
+  // template parity the assistant expects on /v1/chat/completions.
+  '-c', '8192',
+  '--jinja',
+  // Gemma-4 ships a thinking phase that first drains tokens into
+  // reasoning_content and only then answers. At ~10 tok/s on this CPU every
+  // scan would pay for thinking it never asked for; budget 0 runs it direct.
+  '--reasoning-budget', '0',
+  // Senior weights stay resident — the RAM guard was measured in the bench and
+  // a paged-out 26B would stall every scan on this box.
+  '--load-mode', 'mlock'
 ]
-const service = spawn(uv, args, { cwd: root, env: childEnv, windowsHide: true, stdio: 'inherit' })
+const token = process.env.V8_LOCAL_AI_TOKEN || ''
+if (token) args.push('--api-key', token)
+
+const service = spawn(serverExe, args, { cwd: root, windowsHide: true, stdio: 'inherit' })
 let stopping = false
+
+// Model Center contract (test/plan-v82-models): the launcher's listState() reads
+// the settings key model_runtime and marks it stale after 45 s — this service is
+// its producer. Write it through whatever DB opens; a closed gate or busy WAL
+// degrades to a stale badge, never to a crash.
+const RUNTIME_FRESH_MS = 45 * 1000
+const RUNTIME_TICK_MS = 30 * 1000 // stay inside the consumer's 45 s freshness window
+function publishRuntime(status) {
+  try {
+    const { getDatabase } = require('../db/connect')
+    getDatabase().prepare(`INSERT INTO settings(key,value,updated_at) VALUES('model_runtime',?,datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`)
+      .run(JSON.stringify({ ts: new Date().toISOString(), status, pid: process.pid, model: path.basename(modelFile) }))
+  } catch { /* truth contract: stale badge is acceptable, a crashed service is not */ }
+}
+publishRuntime('starting')
+const runtimeTimer = setInterval(() => {
+  if (!stopping) publishRuntime(service.killed ? 'stopped' : 'running')
+}, RUNTIME_TICK_MS)
+runtimeTimer.unref?.()
 
 function stop() {
   if (stopping) return
   stopping = true
+  clearInterval(runtimeTimer)
+  publishRuntime('stopping')
   if (!service.killed) service.kill()
 }
 
 process.on('SIGINT', stop)
 process.on('SIGTERM', stop)
 service.on('error', (error) => {
-  console.error(`Could not start local model runtime (${error.code || error.name})`)
+  console.error(`Could not start llama-server (${error.code || error.name})`)
   process.exitCode = 1
 })
 service.on('exit', (code, signal) => {
