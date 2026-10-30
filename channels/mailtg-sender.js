@@ -8,6 +8,7 @@ const outbox = require('./outbox')
 const { createTelegram } = require('./telegram')
 const secureStore = require('./secure-store')
 const { log } = require('../lib/logger')
+const { installProcessGuard } = require('../lib/process-guard')
 
 // Sender service for the telegram and email outbox channels (Opus5.5 §6.2
 // transport split). The channels worker stays the INGESTION process (pollers,
@@ -89,6 +90,7 @@ function syncCredentials() {
 async function main() {
   const db = getDatabase()
   runMigrations(db)
+  installProcessGuard({ serviceName: 'mailtg-sender', db })
 
   const { startLease } = require('../lib/lease')
   const lease = startLease('mailtg-sender', {

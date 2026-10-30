@@ -6,6 +6,7 @@ const { getDatabase } = require('../db/connect')
 const { runMigrations } = require('../db/migrate')
 const { execute, authorizeTool, WRITE_TOOLS } = require('../assistant/tools')
 const { createConfirmation } = require('../assistant/confirmations')
+const { installProcessGuard } = require('../lib/process-guard')
 
 function tokenMatches(header, secret) {
   if (!secret || typeof header !== 'string' || !header.startsWith('Bearer ')) return false
@@ -149,6 +150,7 @@ async function main() {
   require('dotenv').config({ path: require('node:path').join(__dirname, '..', '.env') })
   const db = getDatabase()
   runMigrations(db)
+  installProcessGuard({ serviceName: 'mcp', db })
   const instance = await startMcpServer({ db })
   const stopServiceHeartbeat = require('../lib/heartbeat').startHeartbeat('mcp', { db })
   console.log(`SAPAuto MCP listening on ${process.env.V8_MCP_HOST || '127.0.0.1'}:${process.env.V8_MCP_PORT || 3101}`)

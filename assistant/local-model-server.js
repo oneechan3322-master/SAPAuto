@@ -7,6 +7,9 @@ const dotenv = require('dotenv')
 const { localNovaUrl } = require('./model')
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') })
+// Guard goes first, before any exit branch can take the service down silently.
+const { installProcessGuard } = require('../lib/process-guard')
+installProcessGuard({ serviceName: 'local-model' })
 
 const provider = (process.env.AI_PROVIDER || 'gemma4').toLowerCase()
 if (provider !== 'gemma4') {

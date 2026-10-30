@@ -7,6 +7,7 @@ const { runMigrations } = require('../db/migrate')
 const { runAttentionCycle } = require('./monitor')
 const visor = require('./pdf-visor.cjs')
 const { startHeartbeat: startServiceHeartbeat } = require('../lib/heartbeat')
+const { installProcessGuard } = require('../lib/process-guard')
 
 function startAssistantManager({ db = getDatabase(), intervalMs = Number(process.env.V8_ASSISTANT_MANAGER_INTERVAL_MS || 30000), signal } = {}) {
   if (!Number.isInteger(intervalMs) || intervalMs < 5000 || intervalMs > 300000) {
@@ -79,6 +80,7 @@ function startAssistantManager({ db = getDatabase(), intervalMs = Number(process
 function main() {
   const db = getDatabase()
   runMigrations(db)
+  installProcessGuard({ serviceName: 'assistant', db })
   const controller = new AbortController()
   const stop = startAssistantManager({ db, signal: controller.signal })
   const stopServiceHeartbeat = startServiceHeartbeat('assistant', { db })

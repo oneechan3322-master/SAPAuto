@@ -12,6 +12,7 @@ const secureStore = require('./secure-store')
 const { getChannelStatus } = require('../domain/channel-broker.cjs')
 const { audit } = require('../db/queries/shared')
 const { startHeartbeat: startServiceHeartbeat } = require('../lib/heartbeat')
+const { installProcessGuard } = require('../lib/process-guard')
 
 // A sender process that stopped heartbeating must not silently accept queued
 // command deliveries; the queue holds them until it returns.
@@ -28,6 +29,7 @@ function queueReal(db, { eventId, channel, recipient, payload }) {
 async function main() {
   const db = getDatabase()
   runMigrations(db)
+  installProcessGuard({ serviceName: 'channels', db })
   const controller = new AbortController()
   const tasks = []
   const providers = {}

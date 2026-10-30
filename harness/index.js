@@ -6,6 +6,7 @@ const { getDatabase } = require('../db/connect')
 const { runMigrations } = require('../db/migrate')
 const { startHeartbeat } = require('./heartbeat')
 const { startHeartbeat: startServiceHeartbeat } = require('../lib/heartbeat')
+const { installProcessGuard } = require('../lib/process-guard')
 const { startLease } = require('../lib/lease')
 const { startCommandWorker } = require('./commands')
 const { startSchedules } = require('./schedules')
@@ -15,6 +16,7 @@ const { scanAndIngestAllPdfs } = require('../domain/pdf-scanner.cjs')
 async function main() {
   const db = getDatabase()
   runMigrations(db)
+  installProcessGuard({ serviceName: 'harness', db })
 
   // Two harness copies must never scan at once (PM2 #6142 restart overlap and
   // manual starts). The lease is taken before any work begins; a copy that
