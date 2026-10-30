@@ -22,14 +22,16 @@ async function scanOne(account, index, total, db, scanner) {
   setHarnessState('logging_in', { current_account: account.username, account_index: index, account_total: total }, db)
   db.prepare(`INSERT INTO account_status(account_key,state,updated_at) VALUES(?,'scanning',?)
     ON CONFLICT(account_key) DO UPDATE SET state='scanning',updated_at=excluded.updated_at`).run(account.username, now())
+  const eventCount = () => db.prepare("SELECT COUNT(*) AS n FROM events WHERE account_key=? AND kind='new_doc'").get(account.username).n
   try {
     setHarnessState('scanning', { current_account: account.username }, db)
     const result = await scanner(account.username)
     if (!result.login || result.login.success !== true) {
       throw new Error(result.login && result.login.rejected ? 'Portal rejected account authentication' : 'Account scan did not confirm login')
     }
+    const beforeDocs = eventCount()
     ingestAccount(result, db)
-    return true
+    return { ok: true, newDocs: eventCount() - beforeDocs, error: '' }
   } catch (error) {
     const timestamp = now()
     const previous = db.prepare('SELECT consecutive_failures FROM account_status WHERE account_key=?').get(account.username)
@@ -43,11 +45,11 @@ async function scanOne(account, index, total, db, scanner) {
     const companyRow = db.prepare('SELECT id FROM companies WHERE account_key=?').get(account.username)
     db.prepare(`INSERT INTO failures(id,account_key,occurred_at,reason,hint,company_id)
       VALUES(?,?,?,?,?,?)`).run(id('failure'), account.username, timestamp, String(error.message).slice(0, 500),
-      'راجع بيانات الدخول والاتصال، ثم أعد المحاولة بعد التحقق.', companyRow ? companyRow.id : null)
+      '\u0631\u0627\u062C\u0639 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0648\u0627\u0644\u0627\u062A\u0635\u0627\u0644\u060C \u062B\u0645 \u0623\u0639\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F \u0627\u0644\u062A\u062D\u0642\u0642.', companyRow ? companyRow.id : null)
     if (parkedUntil) db.prepare(`INSERT INTO events(id,kind,account_key,payload,created_at)
       VALUES(?,?,?,?,?)`).run(id('event'), 'account_parked', account.username, JSON.stringify({ parkedUntil }), timestamp)
     console.error(`Account scan failed (${account.username}): ${error.message}`)
-    return false
+    return { ok: false, newDocs: 0, error: String(error.message).slice(0, 300) }
   }
 }
 
@@ -67,7 +69,36 @@ function reconcileInterruptedCycles(db = getDatabase()) {
   return changed
 }
 
-async function runCycle({ db = getDatabase(), scanner = runAccount, accountKey = '' } = {}) {
+function notifyScanAccount(db, account, index, total, outcome) {
+  // Per-account scan notifications ride the SAME transactional outbox - the
+  // harness never owns the WhatsApp client; a down transport just parks the
+  // note as pending and the sender service keeps the pacing rules in one place.
+  const controlNumber = setting(db, 'whatsapp_control_number', '')
+  if (!controlNumber) return
+  const digits = String(controlNumber).replace(/\D/g, '')
+  if (!digits) return
+  const companyRow = db.prepare('SELECT name FROM companies WHERE account_key=?').get(account.username)
+  const companyName = (companyRow && companyRow.name) || account.username
+  const timeStr = new Date().toLocaleTimeString('ar-EG', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit' })
+  let messageText
+  if (outcome.ok) {
+    messageText = `\u2705 *\u0627\u0643\u062A\u0645\u0644 \u0641\u062D\u0635 \u0627\u0644\u0645\u0646\u0634\u0623\u0629 (${index}/${total}):*\n\u{1F3E2} *${companyName}*\n\u{1F4C4} \u0645\u0633\u062A\u0646\u062F\u0627\u062A \u062C\u062F\u064A\u062F\u0629: *${outcome.newDocs}*\n\u{1F550} ${timeStr}`
+  } else {
+    messageText = `\u26A0\uFE0F *\u062A\u0639\u0630\u0631 \u0641\u062D\u0635 \u0627\u0644\u0645\u0646\u0634\u0623\u0629 (${index}/${total}):*\n\u{1F3E2} *${companyName}*\n\u274C \u0627\u0644\u0633\u0628\u0628: ${outcome.error || '\u062E\u0637\u0623 \u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641'}\n\u{1F550} ${timeStr}`
+  }
+  const eventId = id('event')
+  db.prepare(`INSERT INTO events(id,kind,account_key,payload,created_at) VALUES(?,?,?,?,?)`)
+    .run(eventId, 'scan_account_completed', account.username,
+      JSON.stringify({ companyName, scanSuccess: Boolean(outcome.ok), newDocsCount: outcome.newDocs || 0, error: outcome.error || '' }), now())
+  require('../channels/outbox').enqueue({
+    eventId,
+    channel: 'whatsapp',
+    recipient: `${digits}@c.us`,
+    payload: { text: messageText }
+  }, db)
+}
+
+async function runCycle({ db = getDatabase(), scanner = runAccount, accountKey = '', gapMs = 10000 } = {}) {
   reconcileInterruptedCycles(db)
   const accounts = await listAccounts(db)
   const selected = accountKey
@@ -93,8 +124,16 @@ async function runCycle({ db = getDatabase(), scanner = runAccount, accountKey =
         interrupted = true
         break
       }
-      if (await scanOne(queue[i], i + 1, queue.length, db, scanner)) processed += 1
+      const outcome = await scanOne(queue[i], i + 1, queue.length, db, scanner)
+      if (outcome.ok) processed += 1
       else failed += 1
+      try { notifyScanAccount(db, queue[i], i + 1, queue.length, outcome) } catch (notifyError) {
+        console.error(`Per-account scan notification failed (${queue[i].username}): ${notifyError.message}`)
+      }
+      // Throttle: 10 s between accounts prevents CPU/RAM spikes on server PC
+      if (i < queue.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, gapMs))
+      }
     }
   } catch (error) {
     db.prepare(`UPDATE automation_cycles SET finished_at=?,state='failed',accounts_processed=?,
@@ -153,7 +192,8 @@ async function runLoop({ db = getDatabase(), scanner = runAccount, sleepMs = 500
         await new Promise((resolve) => setTimeout(resolve, sleepMs))
         continue
       }
-      const quietHours = setting(db, 'quiet_hours', '01:00-06:00')
+      // Active window: 09:00 – 16:00 Cairo. Quiet from 16:00 to 09:00 next day.
+      const quietHours = setting(db, 'quiet_hours', '16:00-09:00')
       const quietRemaining = minutesUntilQuietEnd(quietHours)
       if (quietRemaining) {
         const next = new Date(Date.now() + quietRemaining * 60000)
@@ -183,4 +223,4 @@ async function runLoop({ db = getDatabase(), scanner = runAccount, sleepMs = 500
   }
 }
 
-module.exports = { reconcileInterruptedCycles, runCycle, runLoop, scanOne, queuedScan }
+module.exports = { reconcileInterruptedCycles, runCycle, runLoop, scanOne, queuedScan, notifyScanAccount }
